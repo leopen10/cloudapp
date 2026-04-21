@@ -1,0 +1,49 @@
+# prometheus/prometheus.yml
+# Configuration de Prometheus pour scraper les métriques
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+
+  # Métriques de Traefik
+  - job_name: 'traefik'
+    static_configs:
+      - targets: ['traefik:8080']
+
+  # Métriques du Gateway
+  - job_name: 'gateway'
+    static_configs:
+      - targets: ['gateway:8000']
+    metrics_path: '/metrics'
+
+  # Métriques du service Auth
+  - job_name: 'auth'
+    static_configs:
+      - targets: ['auth:8001']
+    metrics_path: '/metrics'
+
+  # Métriques du service Project
+  - job_name: 'project'
+    static_configs:
+      - targets: ['project:8002']
+    metrics_path: '/metrics'
+
+  # Métriques du service Billing
+  - job_name: 'billing'
+    static_configs:
+      - targets: ['billing:8003']
+    metrics_path: '/metrics'
+
+  # Métriques du service Notification
+  - job_name: 'notification'
+    static_configs:
+      - targets: ['notification:8004']
+    metrics_path: '/metrics'
+
+  # Métriques du service Analytics
+  - job_name: 'analytics'
+    static_configs:
+      - targets: ['analytics:8005']
+    metrics_path: '/metrics'

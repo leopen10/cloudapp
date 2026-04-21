@@ -1,0 +1,82 @@
+# .github/workflows/cd-rollback.yml
+# Déclenché manuellement pour revenir à une version précédente
+
+name: CD — Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Tag Docker à déployer (ex: abc1234 ou latest)'
+        required: true
+        type: string
+
+jobs:
+
+  rollback:
+    name: Rollback vers ${{ github.event.inputs.image_tag }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Rollback via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: 22
+          script: |
+            export DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}
+            export IMAGE_TAG=${{ github.event.inputs.image_tag }}
+
+            echo "=== Rollback vers le tag : $IMAGE_TAG ==="
+
+            # Mise à jour de chaque service avec le tag spécifié
+            for service in auth project billing notification analytics gateway; do
+              echo "Rollback du service : $service"
+              docker service update \
+                --image ${DOCKER_USERNAME}/cloudapp-${service}:${IMAGE_TAG} \
+                cloudapp_${service}
+            done
+
+            echo "=== État des services après rollback ==="
+            docker service ls
+
+      - name: Notification Slack — Succès
+        if: success()
+        run: |
+          curl -X POST ${{ secrets.SLACK_WEBHOOK_URL }} \
+          -H 'Content-type: application/json' \
+          --data '{
+            "text": "⏪ *Rollback effectué avec succès !*",
+            "attachments": [{
+              "color": "warning",
+              "fields": [
+                {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+                {"title": "Auteur", "value": "${{ github.actor }}", "short": true},
+                {"title": "Tag déployé", "value": "${{ github.event.inputs.image_tag }}", "short": true},
+                {"title": "Status", "value": "⏪ Rollback OK", "short": true}
+              ]
+            }]
+          }'
+
+      - name: Notification Slack — Échec
+        if: failure()
+        run: |
+          curl -X POST ${{ secrets.SLACK_WEBHOOK_URL }} \
+          -H 'Content-type: application/json' \
+          --data '{
+            "text": "❌ *Rollback échoué !*",
+            "attachments": [{
+              "color": "danger",
+              "fields": [
+                {"title": "Repository", "value": "${{ github.repository }}", "short": true},
+                {"title": "Auteur", "value": "${{ github.actor }}", "short": true},
+                {"title": "Tag cible", "value": "${{ github.event.inputs.image_tag }}", "short": true},
+                {"title": "Status", "value": "❌ Échec", "short": true}
+              ]
+            }]
+          }'
