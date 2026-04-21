@@ -1,6 +1,4 @@
 # .github/workflows/ci-pull-request.yml
-# Déclenché à chaque Pull Request sur la branche main
-
 name: CI — Pull Request
 
 on:
@@ -9,11 +7,9 @@ on:
 
 jobs:
 
-  # ── Job 1 : Tests unitaires ──────────────────────────────────────────────
   unit-tests:
-    name: Tests Unitaires
+    name: Tests Unitaires (${{ matrix.service }})
     runs-on: ubuntu-latest
-
     strategy:
       matrix:
         service: [auth, project, billing, notification, analytics, gateway]
@@ -29,19 +25,15 @@ jobs:
 
       - name: Installation des dépendances
         run: |
-          pip install fastapi uvicorn pydantic httpx pytest pytest-asyncio coverage
+          cd services/${{ matrix.service }}
+          pip install fastapi uvicorn pydantic httpx \
+            pytest pytest-asyncio coverage
 
       - name: Lancement des tests unitaires
         run: |
           cd services/${{ matrix.service }}
           python -m pytest tests/ -v --tb=short
 
-      - name: Rapport de coverage
-        run: |
-          cd services/${{ matrix.service }}
-          python -m pytest tests/ --cov=app --cov-report=term-missing
-
-  # ── Job 2 : Tests d'intégration ──────────────────────────────────────────
   integration-tests:
     name: Tests d'Intégration
     runs-on: ubuntu-latest
@@ -51,20 +43,11 @@ jobs:
       - name: Checkout du code
         uses: actions/checkout@v4
 
-      - name: Installation Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Installation des dépendances
-        run: |
-          pip install fastapi uvicorn pydantic httpx pytest pytest-asyncio coverage
-
-      - name: Démarrage des services avec Docker Compose
+      - name: Démarrage des services
         run: |
           docker compose -f docker-compose.test.yml up -d --build
 
-      - name: Attente du démarrage des services
+      - name: Attente du démarrage (15s)
         run: sleep 15
 
       - name: Vérification des services
@@ -74,7 +57,6 @@ jobs:
         if: always()
         run: docker compose -f docker-compose.test.yml down
 
-  # ── Job 3 : Notification Slack ───────────────────────────────────────────
   notify:
     name: Notification Slack
     runs-on: ubuntu-latest
