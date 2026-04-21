@@ -1,0 +1,68 @@
+# docker-compose.test.yml
+# Utilisé pour les tests d'intégration en local
+
+services:
+
+  auth:
+    build:
+      context: ./services/auth
+    ports:
+      - "8001:8001"
+    networks:
+      - cloudapp-test
+
+  project:
+    build:
+      context: ./services/project
+    ports:
+      - "8002:8002"
+    networks:
+      - cloudapp-test
+
+  billing:
+    build:
+      context: ./services/billing
+    ports:
+      - "8003:8003"
+    networks:
+      - cloudapp-test
+
+  notification:
+    build:
+      context: ./services/notification
+    ports:
+      - "8004:8004"
+    networks:
+      - cloudapp-test
+
+  analytics:
+    build:
+      context: ./services/analytics
+    ports:
+      - "8005:8005"
+    networks:
+      - cloudapp-test
+
+  gateway:
+    build:
+      context: ./services/gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - AUTH_URL=http://auth:8001
+      - PROJECT_URL=http://project:8002
+      - BILLING_URL=http://billing:8003
+      - NOTIFICATION_URL=http://notification:8004
+      - ANALYTICS_URL=http://analytics:8005
+    depends_on:
+      - auth
+      - project
+      - billing
+      - notification
+      - analytics
+    networks:
+      - cloudapp-test
+
+networks:
+  cloudapp-test:
+    driver: bridge

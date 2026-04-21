@@ -1,0 +1,141 @@
+# docker-compose.prod.yml
+# Utilisé pour le déploiement en production avec Docker Swarm
+
+services:
+
+  traefik:
+    image: traefik:v2.10
+    command:
+      - "--api.dashboard=true"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.swarmMode=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=traefik-public"
+      - "--entrypoints.web.address=:80"
+      - "--metrics.prometheus=true"
+      - "--accesslog=true"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - traefik-public
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.dashboard.rule=Host(`traefik.localhost`)"
+        - "traefik.http.services.dashboard.loadbalancer.server.port=8080"
+
+  gateway:
+    image: ${DOCKER_USERNAME}/cloudapp-gateway:latest
+    environment:
+      - AUTH_URL=http://auth:8001
+      - PROJECT_URL=http://project:8002
+      - BILLING_URL=http://billing:8003
+      - NOTIFICATION_URL=http://notification:8004
+      - ANALYTICS_URL=http://analytics:8005
+    networks:
+      - traefik-public
+      - internal
+    deploy:
+      replicas: 1
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.gateway.rule=PathPrefix(`/`)"
+        - "traefik.http.services.gateway.loadbalancer.server.port=8000"
+        - "traefik.docker.network=traefik-public"
+
+  auth:
+    image: ${DOCKER_USERNAME}/cloudapp-auth:latest
+    networks:
+      - internal
+    deploy:
+      replicas: 1
+      labels:
+        - "traefik.enable=false"
+
+  project:
+    image: ${DOCKER_USERNAME}/cloudapp-project:latest
+    networks:
+      - internal
+    deploy:
+      replicas: 1
+      labels:
+        - "traefik.enable=false"
+
+  billing:
+    image: ${DOCKER_USERNAME}/cloudapp-billing:latest
+    networks:
+      - internal
+    deploy:
+      replicas: 1
+      labels:
+        - "traefik.enable=false"
+
+  notification:
+    image: ${DOCKER_USERNAME}/cloudapp-notification:latest
+    networks:
+      - internal
+    deploy:
+      replicas: 1
+      labels:
+        - "traefik.enable=false"
+
+  analytics:
+    image: ${DOCKER_USERNAME}/cloudapp-analytics:latest
+    networks:
+      - internal
+    deploy:
+      replicas: 1
+      labels:
+        - "traefik.enable=false"
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - internal
+    deploy:
+      replicas: 1
+      labels:
+        - "traefik.enable=false"
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=cloudapp123
+    networks:
+      - internal
+    deploy:
+      replicas: 1
+      labels:
+        - "traefik.enable=false"
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+    networks:
+      - internal
+    deploy:
+      replicas: 1
+      labels:
+        - "traefik.enable=false"
+
+networks:
+  traefik-public:
+    external: true
+  internal:
+    driver: overlay
+    internal: true
