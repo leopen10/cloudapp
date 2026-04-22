@@ -1,59 +1,79 @@
-# docker-compose.test.yml
-# Utilisé pour les tests d'intégration en local
+version: '3.8'
 
 services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: cloudapp2026
+      POSTGRES_DB: cloudapp_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - cloudapp-network
 
   auth:
-    build:
-      context: ./services/auth
+    build: ./services/auth
     ports:
       - "8001:8001"
+    environment:
+      DATABASE_URL: postgresql://postgres:cloudapp2026@postgres:5432/cloudapp_db
+      SECRET_KEY: cloudapp_jwt_secret_2026
+    depends_on:
+      - postgres
     networks:
-      - cloudapp-test
+      - cloudapp-network
 
   project:
-    build:
-      context: ./services/project
+    build: ./services/project
     ports:
       - "8002:8002"
+    environment:
+      DATABASE_URL: postgresql://postgres:cloudapp2026@postgres:5432/cloudapp_db
+    depends_on:
+      - postgres
     networks:
-      - cloudapp-test
+      - cloudapp-network
 
   billing:
-    build:
-      context: ./services/billing
+    build: ./services/billing
     ports:
       - "8003:8003"
+    environment:
+      DATABASE_URL: postgresql://postgres:cloudapp2026@postgres:5432/cloudapp_db
+    depends_on:
+      - postgres
     networks:
-      - cloudapp-test
+      - cloudapp-network
 
   notification:
-    build:
-      context: ./services/notification
+    build: ./services/notification
     ports:
       - "8004:8004"
+    environment:
+      DATABASE_URL: postgresql://postgres:cloudapp2026@postgres:5432/cloudapp_db
+    depends_on:
+      - postgres
     networks:
-      - cloudapp-test
+      - cloudapp-network
 
   analytics:
-    build:
-      context: ./services/analytics
+    build: ./services/analytics
     ports:
       - "8005:8005"
+    environment:
+      DATABASE_URL: postgresql://postgres:cloudapp2026@postgres:5432/cloudapp_db
+    depends_on:
+      - postgres
     networks:
-      - cloudapp-test
+      - cloudapp-network
 
   gateway:
-    build:
-      context: ./services/gateway
+    build: ./services/gateway
     ports:
       - "8000:8000"
-    environment:
-      - AUTH_URL=http://auth:8001
-      - PROJECT_URL=http://project:8002
-      - BILLING_URL=http://billing:8003
-      - NOTIFICATION_URL=http://notification:8004
-      - ANALYTICS_URL=http://analytics:8005
     depends_on:
       - auth
       - project
@@ -61,8 +81,20 @@ services:
       - notification
       - analytics
     networks:
-      - cloudapp-test
+      - cloudapp-network
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - gateway
+    networks:
+      - cloudapp-network
+
+volumes:
+  postgres_data:
 
 networks:
-  cloudapp-test:
+  cloudapp-network:
     driver: bridge

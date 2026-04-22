@@ -1,105 +1,56 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+from typing import Optional
+import sys
+sys.path.insert(0, '/app/shared')
+from database import AnalyticsEvent, Project, Invoice, get_db, init_db
 import uvicorn
 
-# ── Application FastAPI ────────────────────────────────────────────────────
-app = FastAPI(
-    title="CloudApp — Service Analytics",
-    description="Service de suivi analytique",
-    version="1.0.0"
-)
+app = FastAPI(title="CloudApp — Service Analytics", version="2.0.0")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# ── Base de données simulée ────────────────────────────────────────────────
-events_db: dict = {}
-stats_db: dict = {
-    "total_projects": 0,
-    "total_invoices": 0,
-    "total_notifications": 0,
-    "total_users": 0
-}
+@app.on_event("startup")
+def startup():
+    init_db()
 
-# ── Modèles de données ─────────────────────────────────────────────────────
-class TrackEventRequest(BaseModel):
+class TrackEvent(BaseModel):
     event_type: str
-    user_id: str
-    data: dict
-
-class EventResponse(BaseModel):
-    id: str
-    event_type: str
-    user_id: str
-    data: dict
-    status: str
-
-# ── Routes ─────────────────────────────────────────────────────────────────
+    client_id: Optional[int] = None
+    project_id: Optional[int] = None
+    data: Optional[str] = None
 
 @app.get("/health")
-async def health_check():
-    """Vérifie que le service est opérationnel."""
-    return {
-        "status": "ok",
-        "service": "analytics",
-        "version": "1.0.0"
-    }
+async def health():
+    return {"status": "ok", "service": "analytics", "version": "2.0.0"}
 
-@app.post("/track", response_model=EventResponse)
-async def track_event(request: TrackEventRequest):
-    """Enregistre un événement analytique."""
-    event_id = f"evt_{len(events_db) + 1}"
-
-    events_db[event_id] = {
-        "id": event_id,
-        "event_type": request.event_type,
-        "user_id": request.user_id,
-        "data": request.data,
-        "status": "tracked"
-    }
-
-    # Met à jour les statistiques
-    if request.event_type == "project_created":
-        stats_db["total_projects"] += 1
-    elif request.event_type == "invoice_created":
-        stats_db["total_invoices"] += 1
-    elif request.event_type == "notification_sent":
-        stats_db["total_notifications"] += 1
-    elif request.event_type == "user_registered":
-        stats_db["total_users"] += 1
-
-    return EventResponse(
-        id=event_id,
-        event_type=request.event_type,
-        user_id=request.user_id,
-        data=request.data,
-        status="tracked"
+@app.post("/track")
+async def track(req: TrackEvent, db: Session = Depends(get_db)):
+    event = AnalyticsEvent(
+        event_type=req.event_type,
+        client_id=req.client_id,
+        project_id=req.project_id,
+        data=req.data
     )
-
-@app.get("/events")
-async def list_events():
-    """Liste tous les événements enregistrés."""
-    return {
-        "total": len(events_db),
-        "events": list(events_db.values())
-    }
+    db.add(event)
+    db.commit()
+    return {"id": event.id, "event_type": event.event_type, "status": "tracked"}
 
 @app.get("/stats")
-async def get_stats():
-    """Retourne les statistiques globales."""
+async def get_stats(db: Session = Depends(get_db)):
+    total_projects = db.query(Project).count()
+    active_projects = db.query(Project).filter(Project.status == "active").count()
+    total_invoiced = db.query(func.sum(Invoice.amount)).scalar() or 0
+    paid_invoiced = db.query(func.sum(Invoice.amount)).filter(Invoice.status == "paid").scalar() or 0
     return {
-        "stats": stats_db,
-        "total_events": len(events_db)
+        "total_projects": total_projects,
+        "active_projects": active_projects,
+        "total_invoiced": float(total_invoiced),
+        "paid_invoiced": float(paid_invoiced),
+        "pending_invoiced": float(total_invoiced) - float(paid_invoiced)
     }
 
-@app.get("/events/{event_id}")
-async def get_event(event_id: str):
-    """Récupère un événement par son ID."""
-    event = events_db.get(event_id)
-    if not event:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Événement {event_id} introuvable"
-        )
-    return event
-
-# ── Point d'entrée ─────────────────────────────────────────────────────────
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8005, reload=True)

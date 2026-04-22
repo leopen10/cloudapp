@@ -1,7 +1,13 @@
-from sqlalchemy import Column, Integer, String, DateTime, Numeric, ForeignKey, Date, Boolean, Text
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Numeric, ForeignKey, Boolean, Text, Date
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql import func
-from sqlalchemy.orm import relationship
-from app.database import Base
+import os
+
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:cloudapp2026@localhost:5432/cloudapp_db")
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
 
 class User(Base):
     __tablename__ = "users"
@@ -15,13 +21,10 @@ class User(Base):
 class Client(Base):
     __tablename__ = "clients"
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
     company_name = Column(String, nullable=False)
     email = Column(String, nullable=False)
     phone = Column(String)
-    address = Column(Text)
     created_at = Column(DateTime, server_default=func.now())
-    projects = relationship("Project", back_populates="client")
 
 class Project(Base):
     __tablename__ = "projects"
@@ -36,21 +39,6 @@ class Project(Base):
     end_date = Column(Date)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-    client = relationship("Client", back_populates="projects")
-    invoices = relationship("Invoice", back_populates="project")
-    milestones = relationship("Milestone", back_populates="project")
-
-class Milestone(Base):
-    __tablename__ = "milestones"
-    id = Column(Integer, primary_key=True)
-    project_id = Column(Integer, ForeignKey("projects.id"))
-    title = Column(String, nullable=False)
-    description = Column(Text)
-    trigger_pct = Column(Integer, nullable=False)
-    completed = Column(Boolean, default=False)
-    completed_at = Column(DateTime)
-    created_at = Column(DateTime, server_default=func.now())
-    project = relationship("Project", back_populates="milestones")
 
 class Invoice(Base):
     __tablename__ = "invoices"
@@ -64,22 +52,32 @@ class Invoice(Base):
     paid_at = Column(DateTime)
     description = Column(Text)
     created_at = Column(DateTime, server_default=func.now())
-    project = relationship("Project", back_populates="invoices")
-
-class Payment(Base):
-    __tablename__ = "payments"
-    id = Column(Integer, primary_key=True)
-    invoice_id = Column(Integer, ForeignKey("invoices.id"))
-    amount = Column(Numeric(10, 2), nullable=False)
-    payment_method = Column(String, default="virement")
-    paid_at = Column(DateTime, server_default=func.now())
 
 class Notification(Base):
     __tablename__ = "notifications"
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    client_id = Column(Integer, ForeignKey("clients.id"))
     title = Column(String, nullable=False)
     message = Column(Text, nullable=False)
     type = Column(String, default="info")
     read = Column(Boolean, default=False)
     created_at = Column(DateTime, server_default=func.now())
+
+class AnalyticsEvent(Base):
+    __tablename__ = "analytics_events"
+    id = Column(Integer, primary_key=True)
+    event_type = Column(String, nullable=False)
+    client_id = Column(Integer)
+    project_id = Column(Integer)
+    data = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def init_db():
+    Base.metadata.create_all(bind=engine)

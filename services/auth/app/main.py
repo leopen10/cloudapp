@@ -1,102 +1,82 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, EmailStr
-from typing import Optional
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from passlib.context import CryptContext
+from jose import jwt
+from datetime import datetime, timedelta
+import sys, os
+sys.path.insert(0, '/app/shared')
+from database import User, get_db, init_db
 import uvicorn
 
-# ── Application FastAPI ────────────────────────────────────────────────────
-app = FastAPI(
-    title="CloudApp — Service Auth",
-    description="Service d'authentification et d'enregistrement des utilisateurs",
-    version="1.0.0"
-)
+app = FastAPI(title="CloudApp — Service Auth", version="2.0.0")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# ── Base de données simulée (dictionnaire en mémoire) ─────────────────────
-# En production : remplacer par PostgreSQL
-users_db: dict = {}
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+SECRET_KEY = os.getenv("SECRET_KEY", "cloudapp_jwt_secret_2026")
 
-# ── Modèles de données ─────────────────────────────────────────────────────
+@app.on_event("startup")
+def startup():
+    init_db()
+    from database import SessionLocal
+    db = SessionLocal()
+    if not db.query(User).filter(User.email == "leonel@cloudapp.io").first():
+        db.add(User(
+            email="leonel@cloudapp.io",
+            password_hash=pwd_context.hash("admin123"),
+            username="Leonel",
+            role="admin"
+        ))
+        db.commit()
+    db.close()
+
 class RegisterRequest(BaseModel):
     email: str
     password: str
     username: str
+    role: str = "client"
 
 class LoginRequest(BaseModel):
     email: str
     password: str
 
-class UserResponse(BaseModel):
-    id: str
-    email: str
-    username: str
-    message: str
-
-# ── Routes ─────────────────────────────────────────────────────────────────
-
 @app.get("/health")
-async def health_check():
-    """Vérifie que le service est opérationnel."""
-    return {
-        "status": "ok",
-        "service": "auth",
-        "version": "1.0.0"
-    }
+async def health():
+    return {"status": "ok", "service": "auth", "version": "2.0.0"}
 
-@app.post("/register", response_model=UserResponse)
-async def register(request: RegisterRequest):
-    """Enregistre un nouvel utilisateur."""
-    # Vérifie si l'email existe déjà
-    if request.email in users_db:
-        raise HTTPException(
-            status_code=400,
-            detail="Un compte avec cet email existe déjà"
-        )
-
-    # Crée l'utilisateur
-    user_id = f"user_{len(users_db) + 1}"
-    users_db[request.email] = {
-        "id": user_id,
-        "email": request.email,
-        "username": request.username,
-        "password": request.password  # En prod : hasher avec bcrypt
-    }
-
-    return UserResponse(
-        id=user_id,
-        email=request.email,
-        username=request.username,
-        message="Compte créé avec succès"
+@app.post("/register")
+async def register(req: RegisterRequest, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == req.email).first():
+        raise HTTPException(status_code=400, detail="Email déjà utilisé")
+    user = User(
+        email=req.email,
+        password_hash=pwd_context.hash(req.password),
+        username=req.username,
+        role=req.role
     )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {"id": user.id, "email": user.email, "username": user.username, "message": "Compte créé avec succès"}
 
 @app.post("/login")
-async def login(request: LoginRequest):
-    """Authentifie un utilisateur."""
-    # Vérifie si l'utilisateur existe
-    user = users_db.get(request.email)
-
-    if not user or user["password"] != request.password:
-        raise HTTPException(
-            status_code=401,
-            detail="Email ou mot de passe incorrect"
-        )
-
-    return {
-        "message": "Connexion réussie",
-        "user_id": user["id"],
-        "username": user["username"],
-        "email": user["email"]
-    }
+async def login(req: LoginRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == req.email).first()
+    if not user or not pwd_context.verify(req.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Email ou mot de passe incorrect")
+    token = jwt.encode({
+        "sub": str(user.id),
+        "username": user.username,
+        "role": user.role,
+        "exp": datetime.utcnow() + timedelta(hours=24)
+    }, SECRET_KEY, algorithm="HS256")
+    return {"access_token": token, "token_type": "bearer", "role": user.role, "username": user.username}
 
 @app.get("/users")
-async def list_users():
-    """Liste tous les utilisateurs (admin uniquement en prod)."""
-    return {
-        "total": len(users_db),
-        "users": [
-            {"id": u["id"], "email": u["email"], "username": u["username"]}
-            for u in users_db.values()
-        ]
-    }
+async def list_users(db: Session = Depends(get_db)):
+    users = db.query(User).all()
+    return {"total": len(users), "users": [{"id": u.id, "email": u.email, "username": u.username, "role": u.role} for u in users]}
 
-# ── Point d'entrée ─────────────────────────────────────────────────────────
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)

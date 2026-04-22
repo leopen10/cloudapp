@@ -1,16 +1,12 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import httpx
-import uvicorn
+from typing import Optional
+import httpx, uvicorn
 
-# ── Application FastAPI ────────────────────────────────────────────────────
-app = FastAPI(
-    title="CloudApp — Service Gateway",
-    description="Point d'entrée unique vers tous les microservices",
-    version="1.0.0"
-)
+app = FastAPI(title="CloudApp — Gateway", version="2.0.0")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# ── URLs des services internes ─────────────────────────────────────────────
 SERVICES = {
     "auth":         "http://auth:8001",
     "project":      "http://project:8002",
@@ -19,140 +15,132 @@ SERVICES = {
     "analytics":    "http://analytics:8005",
 }
 
-# ── Modèles de données ─────────────────────────────────────────────────────
-class WorkflowRequest(BaseModel):
-    email: str
-    password: str
-    username: str
-    project_name: str
-    project_description: str
-
-# ── Routes ─────────────────────────────────────────────────────────────────
-
 @app.get("/")
 async def root():
-    """Route principale du Gateway."""
-    return {
-        "message": "Bienvenue sur CloudApp Gateway",
-        "author": "Leonel-Magloire PENGOU",
-        "version": "1.0.0",
-        "services": list(SERVICES.keys())
-    }
+    return {"message": "Bienvenue sur CloudApp Gateway", "version": "2.0.0"}
 
 @app.get("/health")
-async def health_check():
-    """Vérifie que le Gateway est opérationnel."""
-    return {
-        "status": "ok",
-        "service": "gateway",
-        "version": "1.0.0"
-    }
+async def health():
+    return {"status": "ok", "service": "gateway", "version": "2.0.0"}
 
 @app.get("/status")
-async def services_status():
-    """Vérifie l'état de tous les microservices."""
+async def status():
     results = {}
     async with httpx.AsyncClient(timeout=5.0) as client:
-        for service_name, url in SERVICES.items():
+        for name, url in SERVICES.items():
             try:
-                response = await client.get(f"{url}/health")
-                results[service_name] = {
-                    "status": "ok" if response.status_code == 200 else "error",
-                    "code": response.status_code
-                }
-            except Exception as e:
-                results[service_name] = {
-                    "status": "unreachable",
-                    "error": str(e)
-                }
-    return {
-        "gateway": "ok",
-        "services": results
-    }
+                r = await client.get(f"{url}/health")
+                results[name] = {"status": "ok" if r.status_code == 200 else "error"}
+            except:
+                results[name] = {"status": "unreachable"}
+    return {"gateway": "ok", "services": results}
 
-@app.post("/workflow")
-async def create_project_workflow(request: WorkflowRequest):
-    """
-    Workflow complet de création de projet :
-    1. Enregistre l'utilisateur (Auth)
-    2. Crée le projet (Project)
-    3. Crée une facture (Billing)
-    4. Envoie une notification (Notification)
-    5. Enregistre l'événement (Analytics)
-    """
-    results = {}
-
+# ── AUTH ──────────────────────────────────────────────────────────────────────
+@app.post("/auth/login")
+async def login(data: dict):
     async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.post(f"{SERVICES['auth']}/login", json=data)
+        return r.json()
 
-        # Étape 1 — Enregistrement utilisateur
-        try:
-            r1 = await client.post(f"{SERVICES['auth']}/register", json={
-                "email": request.email,
-                "password": request.password,
-                "username": request.username
-            })
-            results["auth"] = r1.json()
-            user_id = results["auth"].get("id", "user_unknown")
-        except Exception as e:
-            results["auth"] = {"error": str(e)}
-            user_id = "user_unknown"
+@app.post("/auth/register")
+async def register(data: dict):
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.post(f"{SERVICES['auth']}/register", json=data)
+        return r.json()
 
-        # Étape 2 — Création du projet
-        try:
-            r2 = await client.post(f"{SERVICES['project']}/projects", json={
-                "name": request.project_name,
-                "description": request.project_description,
-                "owner_id": user_id
-            })
-            results["project"] = r2.json()
-            project_id = results["project"].get("id", "proj_unknown")
-        except Exception as e:
-            results["project"] = {"error": str(e)}
-            project_id = "proj_unknown"
+# ── CLIENTS ───────────────────────────────────────────────────────────────────
+@app.get("/clients")
+async def get_clients():
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(f"{SERVICES['project']}/clients")
+        return r.json()
 
-        # Étape 3 — Création facture
-        try:
-            r3 = await client.post(f"{SERVICES['billing']}/invoices", json={
+@app.post("/clients")
+async def create_client(data: dict):
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.post(f"{SERVICES['project']}/clients", json=data)
+        return r.json()
+
+# ── PROJECTS ──────────────────────────────────────────────────────────────────
+@app.get("/projects")
+async def get_projects():
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(f"{SERVICES['project']}/projects")
+        return r.json()
+
+@app.get("/projects/{project_id}")
+async def get_project(project_id: int):
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(f"{SERVICES['project']}/projects/{project_id}")
+        return r.json()
+
+@app.post("/projects")
+async def create_project(data: dict):
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.post(f"{SERVICES['project']}/projects", json=data)
+        return r.json()
+
+@app.put("/projects/{project_id}")
+async def update_project(project_id: int, data: dict):
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.put(f"{SERVICES['project']}/projects/{project_id}", json=data)
+        result = r.json()
+        if "progress" in data:
+            await client.post(
+                f"{SERVICES['billing']}/recalculate/{project_id}",
+                params={"new_progress": data["progress"]}
+            )
+            await client.post(f"{SERVICES['analytics']}/track", json={
+                "event_type": "project_updated",
                 "project_id": project_id,
-                "owner_id": user_id,
-                "amount": 9.99,
-                "description": f"Abonnement CloudApp — {request.project_name}"
+                "data": f"progress={data['progress']}"
             })
-            results["billing"] = r3.json()
-        except Exception as e:
-            results["billing"] = {"error": str(e)}
+        return result
 
-        # Étape 4 — Notification
-        try:
-            r4 = await client.post(f"{SERVICES['notification']}/send", json={
-                "user_id": user_id,
-                "email": request.email,
-                "subject": "Votre projet CloudApp est prêt !",
-                "message": f"Bonjour {request.username}, votre projet '{request.project_name}' a été créé avec succès."
-            })
-            results["notification"] = r4.json()
-        except Exception as e:
-            results["notification"] = {"error": str(e)}
+@app.delete("/projects/{project_id}")
+async def delete_project(project_id: int):
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.delete(f"{SERVICES['project']}/projects/{project_id}")
+        return r.json()
 
-        # Étape 5 — Analytics
-        try:
-            r5 = await client.post(f"{SERVICES['analytics']}/track", json={
-                "event_type": "project_created",
-                "user_id": user_id,
-                "data": {
-                    "project_id": project_id,
-                    "project_name": request.project_name
-                }
-            })
-            results["analytics"] = r5.json()
-        except Exception as e:
-            results["analytics"] = {"error": str(e)}
+# ── INVOICES ──────────────────────────────────────────────────────────────────
+@app.get("/invoices")
+async def get_invoices():
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(f"{SERVICES['billing']}/invoices")
+        return r.json()
 
-    return {
-        "message": "Workflow exécuté avec succès",
-        "results": results
-    }
+@app.get("/invoices/project/{project_id}")
+async def get_invoices_by_project(project_id: int):
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(f"{SERVICES['billing']}/invoices/project/{project_id}")
+        return r.json()
 
-# ── Point d'entrée ─────────────────────────────────────────────────────────
+@app.post("/invoices/{invoice_id}/pay")
+async def pay_invoice(invoice_id: int):
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.post(f"{SERVICES['billing']}/invoices/{invoice_id}/pay")
+        return r.json()
+
+# ── NOTIFICATIONS ─────────────────────────────────────────────────────────────
+@app.get("/notifications")
+async def get_notifications():
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(f"{SERVICES['notification']}/notifications")
+        return r.json()
+
+@app.put("/notifications/{notif_id}/read")
+async def mark_read(notif_id: int):
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.put(f"{SERVICES['notification']}/notifications/{notif_id}/read")
+        return r.json()
+
+# ── ANALYTICS ─────────────────────────────────────────────────────────────────
+@app.get("/analytics/stats")
+async def get_stats():
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(f"{SERVICES['analytics']}/stats")
+        return r.json()
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
