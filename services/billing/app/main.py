@@ -1,85 +1,81 @@
-from sqlalchemy import Column, Integer, String, DateTime, Numeric, ForeignKey, Date, Boolean, Text
-from sqlalchemy.sql import func
-from sqlalchemy.orm import relationship
-from app.database import Base
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from typing import Optional
+from datetime import datetime, timedelta
+import sys
+sys.path.insert(0, '/app/shared')
+from database import Invoice, Project, Notification, get_db, init_db
+import uvicorn
 
-class User(Base):
-    __tablename__ = "users"
-    id = Column(Integer, primary_key=True)
-    email = Column(String, unique=True, nullable=False)
-    password_hash = Column(String, nullable=False)
-    username = Column(String, nullable=False)
-    role = Column(String, default="client")
-    created_at = Column(DateTime, server_default=func.now())
+app = FastAPI(title="CloudApp — Service Billing", version="2.0.0")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-class Client(Base):
-    __tablename__ = "clients"
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
-    company_name = Column(String, nullable=False)
-    email = Column(String, nullable=False)
-    phone = Column(String)
-    address = Column(Text)
-    created_at = Column(DateTime, server_default=func.now())
-    projects = relationship("Project", back_populates="client")
+@app.on_event("startup")
+def startup():
+    init_db()
 
-class Project(Base):
-    __tablename__ = "projects"
-    id = Column(Integer, primary_key=True)
-    client_id = Column(Integer, ForeignKey("clients.id"))
-    name = Column(String, nullable=False)
-    description = Column(Text)
-    budget = Column(Numeric(10, 2), default=0)
-    progress = Column(Integer, default=0)
-    status = Column(String, default="active")
-    start_date = Column(Date)
-    end_date = Column(Date)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-    client = relationship("Client", back_populates="projects")
-    invoices = relationship("Invoice", back_populates="project")
-    milestones = relationship("Milestone", back_populates="project")
+@app.get("/health")
+async def health():
+    return {"status": "ok", "service": "billing", "version": "2.0.0"}
 
-class Milestone(Base):
-    __tablename__ = "milestones"
-    id = Column(Integer, primary_key=True)
-    project_id = Column(Integer, ForeignKey("projects.id"))
-    title = Column(String, nullable=False)
-    description = Column(Text)
-    trigger_pct = Column(Integer, nullable=False)
-    completed = Column(Boolean, default=False)
-    completed_at = Column(DateTime)
-    created_at = Column(DateTime, server_default=func.now())
-    project = relationship("Project", back_populates="milestones")
+@app.get("/invoices")
+async def list_invoices(db: Session = Depends(get_db)):
+    invoices = db.query(Invoice).all()
+    return [{"id": i.id, "project_id": i.project_id, "client_id": i.client_id,
+             "amount": float(i.amount), "percentage_billed": i.percentage_billed,
+             "status": i.status, "due_date": str(i.due_date) if i.due_date else None,
+             "description": i.description, "created_at": str(i.created_at)} for i in invoices]
 
-class Invoice(Base):
-    __tablename__ = "invoices"
-    id = Column(Integer, primary_key=True)
-    project_id = Column(Integer, ForeignKey("projects.id"))
-    client_id = Column(Integer, ForeignKey("clients.id"))
-    amount = Column(Numeric(10, 2), nullable=False)
-    percentage_billed = Column(Integer)
-    status = Column(String, default="pending")
-    due_date = Column(Date)
-    paid_at = Column(DateTime)
-    description = Column(Text)
-    created_at = Column(DateTime, server_default=func.now())
-    project = relationship("Project", back_populates="invoices")
+@app.get("/invoices/project/{project_id}")
+async def invoices_by_project(project_id: int, db: Session = Depends(get_db)):
+    invoices = db.query(Invoice).filter(Invoice.project_id == project_id).all()
+    return [{"id": i.id, "amount": float(i.amount), "percentage_billed": i.percentage_billed,
+             "status": i.status, "due_date": str(i.due_date) if i.due_date else None} for i in invoices]
 
-class Payment(Base):
-    __tablename__ = "payments"
-    id = Column(Integer, primary_key=True)
-    invoice_id = Column(Integer, ForeignKey("invoices.id"))
-    amount = Column(Numeric(10, 2), nullable=False)
-    payment_method = Column(String, default="virement")
-    paid_at = Column(DateTime, server_default=func.now())
+@app.post("/recalculate/{project_id}")
+async def recalculate(project_id: int, new_progress: int, db: Session = Depends(get_db)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Projet non trouvé")
+    paliers = [25, 50, 75, 100]
+    existing = [i.percentage_billed for i in db.query(Invoice).filter(Invoice.project_id == project_id).all()]
+    new_invoices = []
+    for palier in paliers:
+        if new_progress >= palier and palier not in existing:
+            amount = round(float(project.budget) * 0.25, 2)
+            invoice = Invoice(
+                project_id=project_id, client_id=project.client_id,
+                amount=amount, percentage_billed=palier, status="pending",
+                due_date=(datetime.now() + timedelta(days=30)).date(),
+                description=f"Facturation automatique — {palier}% du projet '{project.name}'"
+            )
+            db.add(invoice)
+            db.commit()
+            db.refresh(invoice)
+            new_invoices.append({"id": invoice.id, "amount": amount, "percentage_billed": palier})
+            notif = Notification(
+                client_id=project.client_id,
+                title=f"Nouvelle facture — {project.name}",
+                message=f"Une facture de {amount}€ a été générée pour l'atteinte de {palier}%.",
+                type="invoice"
+            )
+            db.add(notif)
+            db.commit()
+    return {"new_invoices": len(new_invoices), "invoices": new_invoices}
 
-class Notification(Base):
-    __tablename__ = "notifications"
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
-    title = Column(String, nullable=False)
-    message = Column(Text, nullable=False)
-    type = Column(String, default="info")
-    read = Column(Boolean, default=False)
-    created_at = Column(DateTime, server_default=func.now())
+@app.post("/invoices/{invoice_id}/pay")
+async def pay_invoice(invoice_id: int, db: Session = Depends(get_db)):
+    inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Facture non trouvée")
+    if inv.status == "paid":
+        raise HTTPException(status_code=400, detail="Déjà payée")
+    inv.status = "paid"
+    inv.paid_at = datetime.now()
+    db.commit()
+    return {"message": "Paiement enregistré", "invoice_id": invoice_id, "amount": float(inv.amount)}
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8003, reload=True)
