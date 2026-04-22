@@ -8,7 +8,7 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser
 WORKDIR /app
 COPY --from=builder /root/.local /home/appuser/.local
 COPY app/ .
-COPY services/shared/ /app/shared/
+RUN mkdir -p /app/shared
 RUN chown -R appuser:appuser /app
 USER appuser
 ENV PATH=/home/appuser/.local/bin:$PATH

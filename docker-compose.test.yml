@@ -21,6 +21,8 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:cloudapp2026@postgres:5432/cloudapp_db
       SECRET_KEY: cloudapp_jwt_secret_2026
+    volumes:
+      - ./services/shared:/app/shared
     depends_on:
       - postgres
     networks:
@@ -32,6 +34,8 @@ services:
       - "8002:8002"
     environment:
       DATABASE_URL: postgresql://postgres:cloudapp2026@postgres:5432/cloudapp_db
+    volumes:
+      - ./services/shared:/app/shared
     depends_on:
       - postgres
     networks:
@@ -43,6 +47,8 @@ services:
       - "8003:8003"
     environment:
       DATABASE_URL: postgresql://postgres:cloudapp2026@postgres:5432/cloudapp_db
+    volumes:
+      - ./services/shared:/app/shared
     depends_on:
       - postgres
     networks:
@@ -54,6 +60,8 @@ services:
       - "8004:8004"
     environment:
       DATABASE_URL: postgresql://postgres:cloudapp2026@postgres:5432/cloudapp_db
+    volumes:
+      - ./services/shared:/app/shared
     depends_on:
       - postgres
     networks:
@@ -65,6 +73,8 @@ services:
       - "8005:8005"
     environment:
       DATABASE_URL: postgresql://postgres:cloudapp2026@postgres:5432/cloudapp_db
+    volumes:
+      - ./services/shared:/app/shared
     depends_on:
       - postgres
     networks:
@@ -74,6 +84,8 @@ services:
     build: ./services/gateway
     ports:
       - "8000:8000"
+    volumes:
+      - ./services/shared:/app/shared
     depends_on:
       - auth
       - project
