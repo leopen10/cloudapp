@@ -6,6 +6,7 @@ import ProjectDetail from './pages/ProjectDetail';
 import Clients from './pages/Clients';
 import Invoices from './pages/Invoices';
 import Layout from './components/Layout';
+import Notifications from './pages/Notifications';
 
 function PrivateRoute({ children }) {
   return localStorage.getItem('token') ? children : <Navigate to="/login" />;
@@ -22,6 +23,7 @@ export default function App() {
           <Route path="projects/:id" element={<ProjectDetail />} />
           <Route path="clients" element={<Clients />} />
           <Route path="invoices" element={<Invoices />} />
+          <Route path="notifications" element={<Notifications />} />
         </Route>
       </Routes>
     </BrowserRouter>

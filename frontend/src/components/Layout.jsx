@@ -27,7 +27,8 @@ export default function Layout() {
         <NavLink to="/" end style={linkStyle}>Vue d'ensemble</NavLink>
         <NavLink to="/projects" style={linkStyle}>Mes projets</NavLink>
         <NavLink to="/invoices" style={linkStyle}>Factures</NavLink>
-        <NavLink to="/clients" style={linkStyle}>Clients</NavLink>
+       <NavLink to="/clients" style={linkStyle}>Clients</NavLink>
+<NavLink to="/notifications" style={linkStyle}>Notifications</NavLink>
         <div style={{ marginTop: 'auto', padding: '10px 12px', fontSize: 12, color: '#6b7494' }}>
           <div style={{ color: '#e8eaf0', marginBottom: 4, fontWeight: 500 }}>{username}</div>
           <div style={{ color: '#3ecf8e', cursor: 'pointer' }} onClick={logout}>● Déconnexion</div>

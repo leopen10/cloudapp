@@ -67,6 +67,7 @@ services:
     ports:
       - "8004:8004"
     environment:
+      RESEND_API_KEY: re_eAaHN2mR_4iNW4nMchNcws4kpchFcmh96
       DATABASE_URL: postgresql://postgres:cloudapp2026@postgres:5432/cloudapp_db
     volumes:
       - ./services/shared:/app/shared
