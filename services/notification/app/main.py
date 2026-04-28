@@ -7,6 +7,8 @@ sys.path.insert(0, '/app/shared')
 
 app = FastAPI(title="CloudApp — Gateway", version="2.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+from prometheus_fastapi_instrumentator import Instrumentator
+Instrumentator().instrument(app).expose(app)
 
 SERVICES = {
     "auth": "http://auth:8001",

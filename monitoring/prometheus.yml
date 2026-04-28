@@ -1,0 +1,34 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'cloudapp-gateway'
+    static_configs:
+      - targets: ['gateway:8000']
+    metrics_path: '/metrics'
+
+  - job_name: 'cloudapp-auth'
+    static_configs:
+      - targets: ['auth:8001']
+    metrics_path: '/metrics'
+
+  - job_name: 'cloudapp-project'
+    static_configs:
+      - targets: ['project:8002']
+    metrics_path: '/metrics'
+
+  - job_name: 'cloudapp-billing'
+    static_configs:
+      - targets: ['billing:8003']
+    metrics_path: '/metrics'
+
+  - job_name: 'cloudapp-notification'
+    static_configs:
+      - targets: ['notification:8004']
+    metrics_path: '/metrics'
+
+  - job_name: 'cloudapp-analytics'
+    static_configs:
+      - targets: ['analytics:8005']
+    metrics_path: '/metrics'

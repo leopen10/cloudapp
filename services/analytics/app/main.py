@@ -11,6 +11,8 @@ import uvicorn
 
 app = FastAPI(title="CloudApp — Service Analytics", version="2.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+from prometheus_fastapi_instrumentator import Instrumentator
+Instrumentator().instrument(app).expose(app)
 
 @app.on_event("startup")
 def startup():
