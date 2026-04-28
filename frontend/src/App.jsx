@@ -1,4 +1,5 @@
 import Architecture from './pages/Architecture';
+import Monitoring from './pages/Monitoring';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -17,6 +18,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="monitoring" element={<Monitoring />} />
         <Route path="architecture" element={<Architecture />} />
         <Route path="/login" element={<Login />} />
         <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
