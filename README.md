@@ -1,26 +1,102 @@
-# CloudApp — Pipeline CI/CD Microservices Complet
+# CloudApp — Microservices, CI/CD et supervision
 
-Architecture microservices production-ready avec GitHub Actions, Traefik, Docker Swarm.
+[![CI — Build & Push](https://github.com/leopen10/cloudapp/actions/workflows/ci-build-push.yml/badge.svg?branch=main)](https://github.com/leopen10/cloudapp/actions/workflows/ci-build-push.yml)
 
-## Stack Technique
-- **Backend** : FastAPI (Python 3.11)
-- **Orchestration** : Docker Swarm
-- **Reverse Proxy** : Traefik v2
-- **CI/CD** : GitHub Actions (4 workflows)
-- **Messaging** : Apache Kafka
-- **Monitoring** : Prometheus + Grafana
-- **Tracing** : Jaeger + OpenTelemetry
-- **Sécurité** : Trivy, Pre-commit, Docker Secrets
+Plateforme de gestion de projets et de facturation, découpée en microservices FastAPI,
+livrée par une chaîne CI/CD GitHub Actions et supervisée par Prometheus et Grafana.
+Projet réalisé dans le cadre du titre Administrateur d'Infrastructures Sécurisées (ESTIAM, Bac+3 Cybersécurité & Cloud).
 
-## Services
-| Service | Port | Description |
-|---------|------|-------------|
-| Gateway | 8000 | Point d'entrée unique |
-| Auth | 8001 | Authentification |
-| Project | 8002 | Gestion des projets |
-| Billing | 8003 | Facturation |
-| Notification | 8004 | Notifications email |
-| Analytics | 8005 | Analytique |
+## Architecture
+
+```mermaid
+flowchart LR
+    U[Navigateur] --> T[Traefik<br/>production seulement]
+    T --> F[Frontend React<br/>nginx]
+    F -- /api --> G[Gateway]
+    G --> A[Auth]
+    G --> P[Project]
+    G --> B[Billing]
+    G --> N[Notification]
+    G --> S[Analytics]
+    A & P & B & N & S --> D[(PostgreSQL)]
+    PR[Prometheus] -. scrape /metrics .-> G & A & P & B & N & S
+    GR[Grafana] --> PR
+```
+
+| Composant | Rôle |
+|---|---|
+| Frontend | Interface React servie par nginx, qui relaie `/api/` vers le Gateway |
+| Gateway (8000) | Point d'entrée de l'API, route les requêtes vers les services |
+| Auth (8001) | Inscription et connexion, jetons JWT |
+| Project (8002) | Clients et projets |
+| Billing (8003) | Factures, calculées selon l'avancement des projets |
+| Notification (8004) | Notifications internes (stockées en base) |
+| Analytics (8005) | Événements et statistiques |
+| PostgreSQL | Base de données commune, code partagé dans `services/shared` |
+| Prometheus, Grafana | Métriques des services et tableaux de bord |
+| Traefik v3 | Reverse proxy de la pile de production (Docker Swarm) |
+
+## Lancer le projet en local
+
+Prérequis : Docker Desktop.
+
+```bash
+cp .env.example .env          # valeurs factices : suffisantes pour un usage local
+docker compose -f docker-compose.test.yml up -d --build
+```
+
+| Adresse | Contenu |
+|---|---|
+| http://localhost:3000 | Application |
+| http://localhost:8000/docs | Documentation Swagger du Gateway |
+| http://localhost:9090 | Prometheus |
+| http://localhost:3001 | Grafana |
+
+Les ports ne sont ouverts que sur `127.0.0.1`. Les mots de passe et la clé de signature des connexions
+se règlent dans le fichier `.env`, qui n'est jamais versionné.
+
+## Tests
+
+Chaque service a sa suite `pytest` dans `services/<nom>/tests/`. Les tests utilisent une base PostgreSQL :
+la CI en démarre une jetable à chaque exécution.
+
+## CI/CD (GitHub Actions)
+
+| Workflow | Déclencheur | Rôle |
+|---|---|---|
+| `ci-pull-request.yml` | pull request | Lint, tests unitaires (avec PostgreSQL), scan Trivy des 7 images, test d'intégration de la pile complète |
+| `ci-build-push.yml` | push sur `main` | Construction locale, **scan Trivy bloquant**, puis publication sur Docker Hub (tags `latest` et SHA du commit) |
+| `cd-deploy.yml` | manuel | Déploiement Docker Swarm par SSH, tag d'image au choix (sert aussi de retour arrière), vérification de disponibilité |
+| `cd-rollback.yml` | manuel | Retour à une version précédente |
+
+## Sécurité
+
+- Scan Trivy (CRITICAL et HIGH corrigeables) **avant** toute publication d'image.
+- Aucun secret dans le dépôt : variables lues dans `.env` (ignoré par Git) en local, secrets GitHub en CI/CD.
+- Images en deux étapes, exécutées par un utilisateur non privilégié, sans `setuptools` ni `wheel` dans l'image finale.
+- Dépendances Python à version figée.
+- Production : un seul port public (80, Traefik), réseau interne sans accès sortant, PostgreSQL et Prometheus non exposés.
+- Workflows avec permissions minimales ; l'action Trivy est épinglée sur une version immuable.
+
+## Déploiement
+
+`docker-compose.prod.yml` décrit la pile Docker Swarm (nœud unique). Variables attendues au déploiement :
+`DOCKER_USERNAME`, `IMAGE_TAG`, `POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `GRAFANA_ADMIN_PASSWORD`, `RESEND_API_KEY` (facultative).
+Dimensionnement : la somme des limites de mémoire atteint environ 1,5 Go, prévoir une instance de 2 Go de RAM.
+
+L'infrastructure AWS utilisée pendant le développement est arrêtée : il n'y a pas de démonstration en ligne,
+et la pile de production n'a pas été redéployée depuis la refonte de septembre 2026 (elle est validée par `docker stack config`, pas encore par un déploiement).
+
+## Limites connues et pistes d'évolution
+
+- **E-mails de notification** : l'envoi par e-mail n'est pas implémenté. Le service Notification enregistre les notifications en base.
+- **Traçage distribué** (OpenTelemetry + Jaeger) : non implémenté.
+- **HTTPS** : nécessite un nom de domaine (Let's Encrypt via Traefik).
+- **Haute disponibilité** : la pile Swarm est mono-nœud, sans réplication de la base.
+- **Sauvegardes PostgreSQL** : non automatisées.
+- **Infrastructure as code** (Terraform) : à écrire.
+- **Migrations de base** : le schéma est créé au démarrage, sans outil de migration.
 
 ## Auteur
-Leonel-Magloire PENGOU — ESTIAM Paris Bac+3 Cybersécurité & Cloud
+
+Leonel-Magloire PENGOU — ESTIAM Paris, Bac+3 Cybersécurité & Cloud
