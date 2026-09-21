@@ -27,3 +27,8 @@ def test_mark_read_missing():
 def test_notify_welcome_missing_client():
     r = client.post("/notify/welcome", json={"client_id": 99999})
     assert r.status_code in [200, 404, 500]
+
+def test_metrics_endpoint_is_exposed():
+    """Prometheus et le controle de sante Swarm lisent /metrics."""
+    r = client.get("/metrics")
+    assert r.status_code == 200

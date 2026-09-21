@@ -1,7 +1,7 @@
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Numeric, ForeignKey, Boolean, Text, Date
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, text
 import os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:cloudapp2026@localhost:5432/cloudapp_db")
@@ -79,5 +79,15 @@ def get_db():
     finally:
         db.close()
 
+
+# Plusieurs services demarrent en meme temps sur une base neuve et executent tous init_db().
+# Sans verrou, leurs CREATE TABLE concurrents se percutent (pg_type_typname_nsp_index).
+# Le verrou consultatif de PostgreSQL les fait passer l'un apres l'autre.
+INIT_DB_LOCK_ID = 724618
+
+
 def init_db():
-    Base.metadata.create_all(bind=engine, checkfirst=True)
+    with engine.begin() as conn:
+        if conn.dialect.name == "postgresql":
+            conn.execute(text("SELECT pg_advisory_xact_lock(:id)"), {"id": INIT_DB_LOCK_ID})
+        Base.metadata.create_all(bind=conn, checkfirst=True)
