@@ -41,6 +41,27 @@ jobs:
       matrix:
         service: [auth, project, billing, notification, analytics, gateway]
 
+    # Base PostgreSQL jetable : les services ouvrent la base des l'import des tests.
+    # Les valeurs ci-dessous n'existent que le temps du test (serveur GitHub).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci_only_password
+          POSTGRES_DB: cloudapp_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:ci_only_password@localhost:5432/cloudapp_db
+      PYTHONPATH: ${{ github.workspace }}/services/shared:${{ github.workspace }}/services/${{ matrix.service }}/app
+
     steps:
       - name: Checkout du code
         uses: actions/checkout@v4
@@ -55,9 +76,10 @@ jobs:
       - name: Installation des dépendances du service
         run: pip install -r services/${{ matrix.service }}/app/requirements.txt
 
+      - name: Creation des tables de test
+        run: python -c "import database; database.init_db()"
+
       - name: Lancement des tests unitaires
-        env:
-          PYTHONPATH: ${{ github.workspace }}/services/shared:${{ github.workspace }}/services/${{ matrix.service }}/app
         run: |
           cd services/${{ matrix.service }}
           python -m pytest tests/ -v --tb=short
