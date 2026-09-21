@@ -95,6 +95,7 @@ if (-not (Test-DockerEngine)) {
 if ($Down) {
     Say ''
     Say '== Arret de la pile de production locale ==' 'Cyan'
+    docker service update --quiet --publish-rm 16686 "${Stack}_jaeger" 2>$null | Out-Null
     docker stack rm $Stack
     Say 'Attente de la suppression des services (20 s)...'
     Start-Sleep -Seconds 20
@@ -202,6 +203,11 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+# Jaeger n'est volontairement PAS publie dans docker-compose.prod.yml (un seul port public : 80,
+# pour Traefik). On l'expose ici temporairement, en local seulement, pour pouvoir consulter les
+# traces dans un navigateur pendant la validation/demo ; "-Down" retire cette exception.
+docker service update --quiet --publish-add published=16686,target=16686,mode=host "${Stack}_jaeger" 2>$null | Out-Null
+
 # ---------------------------------------------------------------
 # 3) Attente des services
 # ---------------------------------------------------------------
@@ -291,6 +297,35 @@ else {
         if ($line -match '\[backup\]') { Say ('    ' + $line) 'DarkGray' }
     }
 }
+
+# --- Tracage distribue (OpenTelemetry -> Jaeger) : une requete applicative doit produire
+# une trace visible dans Jaeger, avec des spans d'au moins 2 services differents. ---
+$traceOk = $false
+$traceDetail = ''
+for ($i = 1; $i -le 15 -and -not $traceOk; $i++) {
+    try {
+        $svcs = Invoke-RestMethod -Uri 'http://localhost:16686/api/services' -TimeoutSec 5
+        $gwTraces = Invoke-RestMethod -Uri 'http://localhost:16686/api/traces?service=gateway&limit=5&lookback=5m' -TimeoutSec 5
+        if ($gwTraces.data -and $gwTraces.data.Count -gt 0) {
+            $names = @{}
+            foreach ($t in $gwTraces.data) {
+                foreach ($sp in $t.spans) {
+                    $pid_ = $sp.processID
+                    $svcName = $t.processes.$pid_.serviceName
+                    if ($svcName) { $names[$svcName] = $true }
+                }
+            }
+            if ($names.Keys.Count -ge 2) {
+                $traceOk = $true
+                $traceDetail = "services relies dans une meme trace : " + (($names.Keys | Sort-Object) -join ', ')
+            }
+        }
+    }
+    catch { }
+    if (-not $traceOk) { Start-Sleep -Seconds 4 }
+}
+Add-Result 'Tracage distribue (Jaeger recoit des traces multi-services)' $traceOk $traceDetail
+if ($traceOk) { Say '    Interface : http://localhost:16686 (le temps de cette session de test)' 'DarkGray' }
 
 $r = Get-Retry 'http://localhost/grafana/login'
 $okGraf = ($null -ne $r -and $r.Content -match 'Grafana')
