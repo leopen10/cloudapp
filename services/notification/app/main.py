@@ -9,6 +9,8 @@ from database import Notification, Client, get_db, init_db
 import uvicorn
 
 app = FastAPI(title="CloudApp — Service Notification", version="2.0.0")
+from prometheus_fastapi_instrumentator import Instrumentator
+Instrumentator().instrument(app).expose(app)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 @app.on_event("startup")

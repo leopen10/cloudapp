@@ -237,8 +237,10 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
       - "--storage.tsdb.retention.time=7d"
+    configs:
+      - source: prometheus_yml
+        target: /etc/prometheus/prometheus.yml
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     networks:
       - backend
@@ -279,6 +281,14 @@ services:
         - "traefik.http.routers.grafana.entrypoints=web"
         - "traefik.http.routers.grafana.priority=100"
         - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+
+# Configuration Prometheus fournie par Swarm (fonctionne sur Linux comme sur Windows, et en multi-noeuds).
+# Un "config" Swarm est immuable : apres toute modification de prometheus/prometheus.yml,
+# changer le suffixe du nom (prometheus_yml_v1 -> prometheus_yml_v2) avant de redeployer.
+configs:
+  prometheus_yml:
+    name: prometheus_yml_v1
+    file: ./prometheus/prometheus.yml
 
 volumes:
   postgres_data:
