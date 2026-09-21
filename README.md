@@ -138,9 +138,21 @@ docker service update --publish-rm 16686 cloudprod_jaeger
 ```
 `scripts/swarm-local-test.ps1` fait cette publication automatiquement pendant sa validation, et la retire avec `-Down`.
 
+## E-mails de notification (Resend)
+
+Le service Notification enregistre toujours la notification en base, puis tente l'envoi d'un
+e-mail via [Resend](https://resend.com) : `RESEND_API_KEY` absente ou API indisponible ne bloque
+jamais la requête (mêmes principes que pour le tracage : dégradation silencieuse, jamais de panne
+en cascade). Déclenché automatiquement par le Gateway :
+- `POST /projects` → e-mail « nouveau projet »
+- `PUT /projects/{id}` avec un `progress` → e-mail « avancement », puis un e-mail par facture générée
+
+Variables : `RESEND_API_KEY` (clé Resend), `RESEND_FROM_EMAIL` (facultative, par défaut l'adresse
+d'essai `onboarding@resend.dev` — suffisante sans domaine vérifié).
+
 ## Limites connues et pistes d'évolution
 
-- **E-mails de notification** : l'envoi par e-mail n'est pas implémenté. Le service Notification enregistre les notifications en base.
+- **E-mails de notification** : implémentés (Resend). Le service Notification enregistre chaque notification en base puis tente l'envoi ; sans `RESEND_API_KEY`, ou si Resend échoue, l'e-mail est simplement ignoré et la notification reste créée.
 - **HTTPS** : nécessite un nom de domaine (Let's Encrypt via Traefik).
 - **Haute disponibilité** : la pile Swarm est mono-nœud, sans réplication de la base.
 - **Sauvegardes hors site** : les sauvegardes restent sur le serveur (volume Docker). Une copie vers un stockage externe (S3) est à ajouter.
