@@ -56,6 +56,8 @@ jobs:
         run: pip install -r services/${{ matrix.service }}/app/requirements.txt
 
       - name: Lancement des tests unitaires
+        env:
+          PYTHONPATH: ${{ github.workspace }}/services/shared:${{ github.workspace }}/services/${{ matrix.service }}/app
         run: |
           cd services/${{ matrix.service }}
           python -m pytest tests/ -v --tb=short
