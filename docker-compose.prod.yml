@@ -1,143 +1,295 @@
 # docker-compose.prod.yml
-# Utilisé pour le déploiement en production avec Docker Swarm
+# Stack Docker Swarm de production (noeud unique).
+#
+# Variables attendues au deploiement (fournies par le CD a partir de GitHub Secrets) :
+#   DOCKER_USERNAME          compte Docker Hub
+#   IMAGE_TAG                tag des images (SHA du commit) ; "latest" par defaut
+#   POSTGRES_PASSWORD        mot de passe PostgreSQL (lettres et chiffres uniquement)
+#   JWT_SECRET_KEY           cle de signature des connexions (jetons JWT)
+#   GRAFANA_ADMIN_PASSWORD   mot de passe administrateur Grafana
+#   RESEND_API_KEY           cle Resend (facultative : sans elle, aucun e-mail n'est envoye)
+#
+# Exposition : SEUL Traefik publie un port (80). Le frontend et Grafana passent par lui.
+# PostgreSQL, Prometheus et les services applicatifs ne sont joignables que depuis la stack.
+#
+# Reseaux :
+#   traefik-public  Traefik <-> frontend, Grafana, Prometheus (cree a part par le CD)
+#   backend         reseau interne (sans acces sortant) : services, PostgreSQL, Prometheus
+#   egress          acces sortant, uniquement pour le service notification (API Resend)
+
+version: "3.8"
 
 services:
 
   traefik:
-    image: traefik:v2.11
-    environment:
-      - DOCKER_API_VERSION=1.41
+    image: traefik:v3.6.7
     command:
-      - "--api.dashboard=true"
-      - "--api.insecure=true"
-      - "--providers.docker=true"
-      - "--providers.docker.swarmMode=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--providers.docker.network=traefik-public"
+      - "--providers.swarm=true"
+      - "--providers.swarm.exposedbydefault=false"
+      - "--providers.swarm.network=traefik-public"
       - "--entrypoints.web.address=:80"
       - "--metrics.prometheus=true"
       - "--accesslog=true"
+      - "--log.level=INFO"
     ports:
-      - "80:80"
-      - "8080:8080"
+      - target: 80
+        published: 80
+        protocol: tcp
+        mode: host
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - traefik-public
     deploy:
+      replicas: 1
       placement:
         constraints:
           - node.role == manager
-      labels:
-        - "traefik.enable=true"
-        - "traefik.http.routers.dashboard.rule=Host(`traefik.localhost`)"
-        - "traefik.http.services.dashboard.loadbalancer.server.port=8080"
+      resources:
+        limits:
+          memory: 96M
+      restart_policy:
+        condition: any
+        delay: 5s
 
-  gateway:
-    image: ${DOCKER_USERNAME}/cloudapp-gateway:latest
-    environment:
-      - AUTH_URL=http://auth:8001
-      - PROJECT_URL=http://project:8002
-      - BILLING_URL=http://billing:8003
-      - NOTIFICATION_URL=http://notification:8004
-      - ANALYTICS_URL=http://analytics:8005
+  frontend:
+    image: ${DOCKER_USERNAME}/cloudapp-frontend:${IMAGE_TAG:-latest}
     networks:
       - traefik-public
-      - internal
+      - backend
     deploy:
       replicas: 1
+      resources:
+        limits:
+          memory: 48M
+      restart_policy:
+        condition: any
+        delay: 5s
       labels:
         - "traefik.enable=true"
-        - "traefik.http.routers.gateway.rule=PathPrefix(`/`) || Host(`34.204.78.180`)"
-        - "traefik.http.services.gateway.loadbalancer.server.port=8000"
-        - "traefik.docker.network=traefik-public"
+        - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+        - "traefik.http.routers.frontend.entrypoints=web"
+        - "traefik.http.routers.frontend.priority=1"
+        - "traefik.http.services.frontend.loadbalancer.server.port=80"
+
+  gateway:
+    image: ${DOCKER_USERNAME}/cloudapp-gateway:${IMAGE_TAG:-latest}
+    environment:
+      AUTH_URL: http://auth:8001
+      PROJECT_URL: http://project:8002
+      BILLING_URL: http://billing:8003
+      NOTIFICATION_URL: http://notification:8004
+      ANALYTICS_URL: http://analytics:8005
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/metrics')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 128M
+      restart_policy:
+        condition: any
+        delay: 5s
 
   auth:
-    image: ${DOCKER_USERNAME}/cloudapp-auth:latest
+    image: ${DOCKER_USERNAME}/cloudapp-auth:${IMAGE_TAG:-latest}
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}@postgres:5432/cloudapp_db
+      SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY manquant}
     networks:
-      - internal
+      - backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/metrics')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     deploy:
       replicas: 1
-      labels:
-        - "traefik.enable=false"
+      resources:
+        limits:
+          memory: 128M
+      restart_policy:
+        condition: any
+        delay: 5s
 
   project:
-    image: ${DOCKER_USERNAME}/cloudapp-project:latest
+    image: ${DOCKER_USERNAME}/cloudapp-project:${IMAGE_TAG:-latest}
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}@postgres:5432/cloudapp_db
     networks:
-      - internal
+      - backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/metrics')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     deploy:
       replicas: 1
-      labels:
-        - "traefik.enable=false"
+      resources:
+        limits:
+          memory: 128M
+      restart_policy:
+        condition: any
+        delay: 5s
 
   billing:
-    image: ${DOCKER_USERNAME}/cloudapp-billing:latest
+    image: ${DOCKER_USERNAME}/cloudapp-billing:${IMAGE_TAG:-latest}
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}@postgres:5432/cloudapp_db
     networks:
-      - internal
+      - backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/metrics')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     deploy:
       replicas: 1
-      labels:
-        - "traefik.enable=false"
+      resources:
+        limits:
+          memory: 128M
+      restart_policy:
+        condition: any
+        delay: 5s
 
   notification:
-    image: ${DOCKER_USERNAME}/cloudapp-notification:latest
+    image: ${DOCKER_USERNAME}/cloudapp-notification:${IMAGE_TAG:-latest}
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}@postgres:5432/cloudapp_db
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
     networks:
-      - internal
+      - backend
+      - egress
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/metrics')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     deploy:
       replicas: 1
-      labels:
-        - "traefik.enable=false"
+      resources:
+        limits:
+          memory: 128M
+      restart_policy:
+        condition: any
+        delay: 5s
 
   analytics:
-    image: ${DOCKER_USERNAME}/cloudapp-analytics:latest
+    image: ${DOCKER_USERNAME}/cloudapp-analytics:${IMAGE_TAG:-latest}
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}@postgres:5432/cloudapp_db
     networks:
-      - internal
+      - backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8005/metrics')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     deploy:
       replicas: 1
-      labels:
-        - "traefik.enable=false"
+      resources:
+        limits:
+          memory: 128M
+      restart_policy:
+        condition: any
+        delay: 5s
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}
+      POSTGRES_DB: cloudapp_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 256M
+      restart_policy:
+        condition: any
+        delay: 5s
 
   prometheus:
+    # A figer sur une version precise une fois validee (docker image inspect prom/prometheus:latest).
     image: prom/prometheus:latest
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-    ports:
-      - "9090:9090"
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
     networks:
-      - internal
+      - backend
+      - traefik-public
     deploy:
       replicas: 1
-      labels:
-        - "traefik.enable=false"
+      resources:
+        limits:
+          memory: 192M
+      restart_policy:
+        condition: any
+        delay: 5s
 
   grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
+    image: grafana/grafana-oss:10.2.0
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=cloudapp123
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD manquant}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+    volumes:
+      - grafana_data:/var/lib/grafana
     networks:
-      - internal
+      - traefik-public
+      - backend
     deploy:
       replicas: 1
+      resources:
+        limits:
+          memory: 192M
+      restart_policy:
+        condition: any
+        delay: 5s
       labels:
-        - "traefik.enable=false"
+        - "traefik.enable=true"
+        - "traefik.http.routers.grafana.rule=PathPrefix(`/grafana`)"
+        - "traefik.http.routers.grafana.entrypoints=web"
+        - "traefik.http.routers.grafana.priority=100"
+        - "traefik.http.services.grafana.loadbalancer.server.port=3000"
 
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    ports:
-      - "16686:16686"
-      - "4317:4317"
-    networks:
-      - internal
-    deploy:
-      replicas: 1
-      labels:
-        - "traefik.enable=false"
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:
 
 networks:
   traefik-public:
     external: true
-  internal:
+  backend:
     driver: overlay
     internal: true
+  egress:
+    driver: overlay

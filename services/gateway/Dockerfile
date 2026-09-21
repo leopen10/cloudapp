@@ -1,14 +1,14 @@
 FROM python:3.11-slim AS builder
 WORKDIR /build
-COPY app/requirements.txt .
+COPY gateway/app/requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
 FROM python:3.11-slim
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 WORKDIR /app
 COPY --from=builder /root/.local /home/appuser/.local
-COPY app/ .
-RUN mkdir -p /app/shared
+COPY gateway/app/ .
+COPY shared/ /app/shared/
 RUN chown -R appuser:appuser /app
 USER appuser
 ENV PATH=/home/appuser/.local/bin:$PATH
