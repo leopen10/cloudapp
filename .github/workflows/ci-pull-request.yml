@@ -157,14 +157,38 @@ jobs:
       - name: État des services
         run: docker compose -f docker-compose.test.yml ps
 
+      # Les conteneurs sont "running" avant que uvicorn accepte les connexions :
+      # on reessaie pendant 60 s au lieu d'echouer sur la premiere reponse vide.
       - name: Smoke test — Gateway
-        run: curl -fsS http://localhost:8000/ | grep -q '"version"'
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/ | grep -q '"version"'; then
+              echo
+              echo "Gateway disponible"
+              exit 0
+            fi
+            echo "Attente du Gateway ($i/30)..."
+            sleep 2
+          done
+          echo "Le Gateway ne repond pas apres 60 s"
+          exit 1
 
       - name: Smoke test — Inscription (Gateway -> Auth -> PostgreSQL)
         run: |
-          curl -fsS -X POST http://localhost:8000/auth/register \
-            -H 'Content-Type: application/json' \
-            -d "{\"email\":\"ci-${GITHUB_RUN_ID}@cloudapp.io\",\"username\":\"ci${GITHUB_RUN_ID}\",\"password\":\"CiTest1234!\",\"full_name\":\"CI Runner\"}"
+          BODY="{\"email\":\"ci-${GITHUB_RUN_ID}@cloudapp.io\",\"username\":\"ci${GITHUB_RUN_ID}\",\"password\":\"CiTest1234!\",\"full_name\":\"CI Runner\"}"
+          for i in $(seq 1 15); do
+            RESP=$(curl -sS -X POST http://localhost:8000/auth/register \
+              -H 'Content-Type: application/json' -d "$BODY" || true)
+            echo "$RESP"
+            if echo "$RESP" | grep -q '"id"'; then
+              echo "Inscription reussie"
+              exit 0
+            fi
+            echo "Nouvel essai ($i/15)..."
+            sleep 3
+          done
+          echo "L'inscription a echoue"
+          exit 1
 
       - name: Logs en cas d'échec
         if: failure()
