@@ -49,11 +49,17 @@ async def send_email(to, subject, html):
         return False
 
 
-def _client_email(db, client_id):
+def _resolve_client(db, client_id):
+    """Verifie que client_id existe avant d'ecrire une Notification (cle etrangere) :
+    un identifiant absent ou inconnu ne doit jamais faire echouer la requete, la
+    notification est alors enregistree sans client associe (et sans e-mail)."""
     if not client_id:
-        return None
+        return None, None
     c = db.query(Client).filter(Client.id == client_id).first()
-    return c.email if c else None
+    if not c:
+        print(f"[notification] client_id={client_id} introuvable : notification enregistree sans client", flush=True)
+        return None, None
+    return client_id, c.email
 
 
 class WelcomeNotify(BaseModel):
@@ -86,10 +92,11 @@ class InvoiceNotify(BaseModel):
 async def notify_welcome(req: WelcomeNotify, db: Session = Depends(get_db)):
     title = "Bienvenue chez CloudApp"
     message = "Votre compte client a ete cree."
-    n = Notification(client_id=req.client_id, title=title, message=message, type="info")
+    client_id, email = _resolve_client(db, req.client_id)
+    n = Notification(client_id=client_id, title=title, message=message, type="info")
     db.add(n)
     db.commit()
-    await send_email(_client_email(db, req.client_id), title, f"<p>{message}</p>")
+    await send_email(email, title, f"<p>{message}</p>")
     return {"status": "ok", "id": n.id}
 
 
@@ -97,10 +104,11 @@ async def notify_welcome(req: WelcomeNotify, db: Session = Depends(get_db)):
 async def notify_project_created(req: ProjectCreatedNotify, db: Session = Depends(get_db)):
     title = f"Nouveau projet \u2014 {req.project_name}"
     message = f"Le projet '{req.project_name}' a ete cree. Budget : {req.budget:.2f} EUR."
-    n = Notification(client_id=req.client_id, title=title, message=message, type="project_update")
+    client_id, email = _resolve_client(db, req.client_id)
+    n = Notification(client_id=client_id, title=title, message=message, type="project_update")
     db.add(n)
     db.commit()
-    await send_email(_client_email(db, req.client_id), title, f"<p>{message}</p>")
+    await send_email(email, title, f"<p>{message}</p>")
     return {"status": "ok", "id": n.id}
 
 
@@ -108,10 +116,11 @@ async def notify_project_created(req: ProjectCreatedNotify, db: Session = Depend
 async def notify_progress(req: ProgressNotify, db: Session = Depends(get_db)):
     title = f"Projet mis a jour \u2014 {req.project_name}"
     message = f"L'avancement de votre projet est maintenant a {req.progress}%."
-    n = Notification(client_id=req.client_id, title=title, message=message, type="project_update")
+    client_id, email = _resolve_client(db, req.client_id)
+    n = Notification(client_id=client_id, title=title, message=message, type="project_update")
     db.add(n)
     db.commit()
-    await send_email(_client_email(db, req.client_id), title, f"<p>{message}</p>")
+    await send_email(email, title, f"<p>{message}</p>")
     return {"status": "ok", "id": n.id}
 
 
@@ -119,10 +128,11 @@ async def notify_progress(req: ProgressNotify, db: Session = Depends(get_db)):
 async def notify_invoice(req: InvoiceNotify, db: Session = Depends(get_db)):
     title = f"Nouvelle facture \u2014 {req.project_name}"
     message = f"Une facture de {req.amount:.2f} EUR a ete generee pour l'atteinte de {req.percentage}%."
-    n = Notification(client_id=req.client_id, title=title, message=message, type="invoice")
+    client_id, email = _resolve_client(db, req.client_id)
+    n = Notification(client_id=client_id, title=title, message=message, type="invoice")
     db.add(n)
     db.commit()
-    await send_email(_client_email(db, req.client_id), title, f"<p>{message}</p>")
+    await send_email(email, title, f"<p>{message}</p>")
     return {"status": "ok", "id": n.id}
 
 
