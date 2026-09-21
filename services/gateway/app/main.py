@@ -84,7 +84,18 @@ async def get_project(project_id: int):
 async def create_project(data: dict):
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.post(f"{SERVICES['project']}/projects", json=data)
-        return r.json()
+        result = r.json()
+        if "id" in result:
+            try:
+                await client.post(f"{SERVICES['notification']}/notify/project-created", json={
+                    "client_id": result.get("client_id"),
+                    "project_id": result["id"],
+                    "project_name": result.get("name"),
+                    "budget": float(result.get("budget", 0)),
+                })
+            except Exception as e:
+                print(f"[GATEWAY] Erreur notification projet cree: {e}")
+        return result
 
 @app.put("/projects/{project_id}")
 async def update_project(project_id: int, data: dict):
@@ -92,10 +103,30 @@ async def update_project(project_id: int, data: dict):
         r = await client.put(f"{SERVICES['project']}/projects/{project_id}", json=data)
         result = r.json()
         if "progress" in data:
-            await client.post(
-                f"{SERVICES['billing']}/recalculate/{project_id}",
-                params={"new_progress": data["progress"]}
-            )
+            try:
+                await client.post(f"{SERVICES['notification']}/notify/progress", json={
+                    "client_id": result.get("client_id"),
+                    "project_id": project_id,
+                    "project_name": result.get("name"),
+                    "progress": data["progress"],
+                })
+            except Exception as e:
+                print(f"[GATEWAY] Erreur notification avancement: {e}")
+            try:
+                inv_r = await client.post(
+                    f"{SERVICES['billing']}/recalculate/{project_id}",
+                    params={"new_progress": data["progress"]}
+                )
+                for inv in inv_r.json().get("invoices", []):
+                    await client.post(f"{SERVICES['notification']}/notify/invoice", json={
+                        "client_id": result.get("client_id"),
+                        "project_id": project_id,
+                        "project_name": result.get("name"),
+                        "amount": inv["amount"],
+                        "percentage": inv["percentage_billed"],
+                    })
+            except Exception as e:
+                print(f"[GATEWAY] Erreur facturation/notification: {e}")
             await client.post(f"{SERVICES['analytics']}/track", json={
                 "event_type": "project_updated",
                 "project_id": project_id,

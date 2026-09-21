@@ -298,6 +298,25 @@ else {
     }
 }
 
+# --- Notifications automatiques (Gateway -> Notification, e-mail via Resend si configure) :
+# la creation d'un projet puis une mise a jour d'avancement doivent produire de nouvelles
+# notifications en base (l'envoi d'e-mail lui-meme n'est pas verifiable sans domaine Resend reel). ---
+$notifOk = $false
+$notifDetail = ''
+try {
+    $before = (Invoke-RestMethod -Uri 'http://localhost/api/notifications' -TimeoutSec 10).Count
+    $proj = Invoke-RestMethod -Method Post -Uri 'http://localhost/api/projects' -ContentType 'application/json' -Body '{"name":"Test tracage","budget":1000}' -TimeoutSec 10
+    if ($proj.id) {
+        Invoke-RestMethod -Method Put -Uri "http://localhost/api/projects/$($proj.id)" -ContentType 'application/json' -Body '{"progress":40}' -TimeoutSec 10 | Out-Null
+    }
+    Start-Sleep -Seconds 2
+    $after = (Invoke-RestMethod -Uri 'http://localhost/api/notifications' -TimeoutSec 10).Count
+    $notifOk = ($after -gt $before)
+    $notifDetail = "$before -> $after notifications"
+}
+catch { $notifDetail = $_.Exception.Message }
+Add-Result 'Notifications automatiques (creation projet + avancement)' $notifOk $notifDetail
+
 # --- Tracage distribue (OpenTelemetry -> Jaeger) : une requete applicative doit produire
 # une trace visible dans Jaeger, avec des spans d'au moins 2 services differents. ---
 $traceOk = $false
