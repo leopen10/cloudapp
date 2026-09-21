@@ -8,6 +8,7 @@
 #   JWT_SECRET_KEY           cle de signature des connexions (jetons JWT)
 #   GRAFANA_ADMIN_PASSWORD   mot de passe administrateur Grafana
 #   RESEND_API_KEY           cle Resend (facultative : sans elle, aucun e-mail n'est envoye)
+#   BACKUP_INTERVAL_SECONDS  intervalle entre deux sauvegardes PostgreSQL (facultatif, 86400 = une par jour)
 #
 # Exposition : SEUL Traefik publie un port (80). Le frontend et Grafana passent par lui.
 # PostgreSQL, Prometheus et les services applicatifs ne sont joignables que depuis la stack.
@@ -230,6 +231,35 @@ services:
         condition: any
         delay: 5s
 
+  # Sauvegarde PostgreSQL : pg_dump + controle d'integrite + rotation + verification par restauration reelle.
+  # Le script est fourni par un "config" Swarm (backup/backup.sh) ; les fichiers vont dans le volume backup_data.
+  backup:
+    image: postgres:16
+    command: ["bash", "/usr/local/bin/backup.sh", "run"]
+    environment:
+      PGHOST: postgres
+      PGUSER: postgres
+      PGDATABASE: cloudapp_db
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}
+      BACKUP_KEEP_DAYS: "7"
+      BACKUP_INTERVAL_SECONDS: "${BACKUP_INTERVAL_SECONDS:-86400}"
+    configs:
+      - source: backup_sh
+        target: /usr/local/bin/backup.sh
+        mode: 0555
+    volumes:
+      - backup_data:/backups
+    networks:
+      - backend
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 128M
+      restart_policy:
+        condition: any
+        delay: 30s
+
   prometheus:
     # A figer sur une version precise une fois validee (docker image inspect prom/prometheus:latest).
     image: prom/prometheus:latest
@@ -289,11 +319,15 @@ configs:
   prometheus_yml:
     name: prometheus_yml_v1
     file: ./prometheus/prometheus.yml
+  backup_sh:
+    name: backup_sh_v1
+    file: ./backup/backup.sh
 
 volumes:
   postgres_data:
   prometheus_data:
   grafana_data:
+  backup_data:
 
 networks:
   traefik-public:

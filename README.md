@@ -21,6 +21,7 @@ flowchart LR
     A & P & B & N & S --> D[(PostgreSQL)]
     PR[Prometheus] -. scrape /metrics .-> G & A & P & B & N & S
     GR[Grafana] --> PR
+    BK[Sauvegarde<br/>quotidienne] --> D
 ```
 
 | Composant | Rôle |
@@ -34,6 +35,7 @@ flowchart LR
 | Analytics (8005) | Événements et statistiques |
 | PostgreSQL | Base de données commune, code partagé dans `services/shared` |
 | Prometheus, Grafana | Métriques des services et tableaux de bord |
+| Backup | Sauvegardes PostgreSQL quotidiennes, vérifiées par restauration (pile de production) |
 | Traefik v3 | Reverse proxy de la pile de production (Docker Swarm) |
 
 ## Lancer le projet en local
@@ -81,11 +83,31 @@ la CI en démarre une jetable à chaque exécution.
 ## Déploiement
 
 `docker-compose.prod.yml` décrit la pile Docker Swarm (nœud unique). Variables attendues au déploiement :
-`DOCKER_USERNAME`, `IMAGE_TAG`, `POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `GRAFANA_ADMIN_PASSWORD`, `RESEND_API_KEY` (facultative).
-Dimensionnement : la somme des limites de mémoire atteint environ 1,5 Go, prévoir une instance de 2 Go de RAM.
+`DOCKER_USERNAME`, `IMAGE_TAG`, `POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `GRAFANA_ADMIN_PASSWORD`,
+`RESEND_API_KEY` et `BACKUP_INTERVAL_SECONDS` (facultatives).
+Dimensionnement : la somme des limites de mémoire atteint environ 1,7 Go, prévoir une instance de 2 Go de RAM.
 
-L'infrastructure AWS utilisée pendant le développement est arrêtée : il n'y a pas de démonstration en ligne,
-et la pile de production n'a pas été redéployée depuis la refonte de septembre 2026 (elle est validée par `docker stack config`, pas encore par un déploiement).
+La pile se valide en local, dans Docker Swarm (Docker Desktop), avec le script `scripts/swarm-local-test.ps1` :
+il déploie la pile avec les images publiées sur Docker Hub, attend que tous les services soient prêts puis vérifie
+l'accès par Traefik, l'inscription jusqu'à la base, Grafana, la collecte Prometheus, l'absence d'exposition de PostgreSQL
+et la sauvegarde avec sa restauration.
+
+L'infrastructure AWS utilisée pendant le développement est arrêtée : il n'y a pas de démonstration en ligne.
+
+## Sauvegardes et restauration
+
+Le service `backup` de la pile de production exécute `backup/backup.sh` : `pg_dump` compressé toutes les 24 h,
+contrôle d'intégrité de l'archive (`gzip -t`), conservation de 7 jours, puis **vérification par restauration réelle**
+dans une base temporaire, avec comparaison du nombre de lignes de chaque table. Les fichiers sont dans le volume Docker `backup_data` (`/backups`).
+
+```bash
+# Lancer une sauvegarde puis sa vérification à la demande
+docker exec $(docker ps -q -f name=_backup) bash /usr/local/bin/backup.sh once
+docker exec $(docker ps -q -f name=_backup) bash /usr/local/bin/backup.sh verify
+
+# Restaurer une sauvegarde dans la base de production (depuis le conteneur backup)
+gunzip -c /backups/<fichier>.sql.gz | psql -v ON_ERROR_STOP=1 -d "$PGDATABASE"
+```
 
 ## Limites connues et pistes d'évolution
 
@@ -93,7 +115,7 @@ et la pile de production n'a pas été redéployée depuis la refonte de septemb
 - **Traçage distribué** (OpenTelemetry + Jaeger) : non implémenté.
 - **HTTPS** : nécessite un nom de domaine (Let's Encrypt via Traefik).
 - **Haute disponibilité** : la pile Swarm est mono-nœud, sans réplication de la base.
-- **Sauvegardes PostgreSQL** : non automatisées.
+- **Sauvegardes hors site** : les sauvegardes restent sur le serveur (volume Docker). Une copie vers un stockage externe (S3) est à ajouter.
 - **Infrastructure as code** (Terraform) : à écrire.
 - **Migrations de base** : le schéma est créé au démarrage, sans outil de migration.
 
