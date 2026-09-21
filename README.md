@@ -22,6 +22,12 @@ flowchart LR
     PR[Prometheus] -. scrape /metrics .-> G & A & P & B & N & S
     GR[Grafana] --> PR
     BK[Sauvegarde<br/>quotidienne] --> D
+    G -. traces .-> J[Jaeger]
+    A -. traces .-> J
+    P -. traces .-> J
+    B -. traces .-> J
+    N -. traces .-> J
+    S -. traces .-> J
 ```
 
 | Composant | Rôle |
@@ -36,6 +42,7 @@ flowchart LR
 | PostgreSQL | Base de données commune, code partagé dans `services/shared` |
 | Prometheus, Grafana | Métriques des services et tableaux de bord |
 | Backup | Sauvegardes PostgreSQL quotidiennes, vérifiées par restauration (pile de production) |
+| Jaeger | Traçage distribué OpenTelemetry (Gateway et les 5 services), non exposé publiquement |
 | Traefik v3 | Reverse proxy de la pile de production (Docker Swarm) |
 
 ## Lancer le projet en local
@@ -109,10 +116,31 @@ docker exec $(docker ps -q -f name=_backup) bash /usr/local/bin/backup.sh verify
 gunzip -c /backups/<fichier>.sql.gz | psql -v ON_ERROR_STOP=1 -d "$PGDATABASE"
 ```
 
+## Traçage distribué (OpenTelemetry + Jaeger)
+
+Le Gateway et les 5 services (Auth, Project, Billing, Notification, Analytics) sont instrumentés
+avec OpenTelemetry : chaque requête produit des spans (FastAPI, appels HTTP entre services, requêtes
+SQLAlchemy), reliés par un même identifiant de trace et envoyés à Jaeger en OTLP/HTTP. Le tracage
+est **facultatif à l'exécution** (actif seulement si `OTEL_EXPORTER_OTLP_ENDPOINT` est défini, ce qui
+est le cas dans la pile de production) : une erreur de télémétrie n'empêche jamais un service de démarrer.
+Les requêtes vers `/metrics` et `/health` sont exclues du traçage (bruit des contrôles périodiques).
+
+Propagation testée sur deux vrais processus, avec un collecteur OTLP réel : la requête traverse le
+Gateway et un service applicatif (y compris ses requêtes SQL) sous un seul et même identifiant de trace.
+
+Jaeger n'est pas publié via Traefik (un seul port public dans la pile : 80). Pour consulter les traces :
+```bash
+# Expose temporairement l'interface, le temps d'une session de demonstration
+docker service update --publish-add published=16686,target=16686,mode=host cloudprod_jaeger
+# puis http://localhost:16686
+# Retrait a la fin :
+docker service update --publish-rm 16686 cloudprod_jaeger
+```
+`scripts/swarm-local-test.ps1` fait cette publication automatiquement pendant sa validation, et la retire avec `-Down`.
+
 ## Limites connues et pistes d'évolution
 
 - **E-mails de notification** : l'envoi par e-mail n'est pas implémenté. Le service Notification enregistre les notifications en base.
-- **Traçage distribué** (OpenTelemetry + Jaeger) : non implémenté.
 - **HTTPS** : nécessite un nom de domaine (Let's Encrypt via Traefik).
 - **Haute disponibilité** : la pile Swarm est mono-nœud, sans réplication de la base.
 - **Sauvegardes hors site** : les sauvegardes restent sur le serveur (volume Docker). Une copie vers un stockage externe (S3) est à ajouter.

@@ -14,6 +14,8 @@ app = FastAPI(title="CloudApp — Service Auth", version="2.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 from prometheus_fastapi_instrumentator import Instrumentator
 Instrumentator().instrument(app).expose(app)
+from telemetry import setup_tracing
+setup_tracing(app, "auth", instrument_db=True)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = os.getenv("SECRET_KEY", "cloudapp_jwt_secret_2026")

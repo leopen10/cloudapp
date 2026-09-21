@@ -76,6 +76,7 @@ services:
   gateway:
     image: ${DOCKER_USERNAME}/cloudapp-gateway:${IMAGE_TAG:-latest}
     environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
       AUTH_URL: http://auth:8001
       PROJECT_URL: http://project:8002
       BILLING_URL: http://billing:8003
@@ -101,6 +102,7 @@ services:
   auth:
     image: ${DOCKER_USERNAME}/cloudapp-auth:${IMAGE_TAG:-latest}
     environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}@postgres:5432/cloudapp_db
       SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY manquant}
     networks:
@@ -123,6 +125,7 @@ services:
   project:
     image: ${DOCKER_USERNAME}/cloudapp-project:${IMAGE_TAG:-latest}
     environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}@postgres:5432/cloudapp_db
     networks:
       - backend
@@ -144,6 +147,7 @@ services:
   billing:
     image: ${DOCKER_USERNAME}/cloudapp-billing:${IMAGE_TAG:-latest}
     environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}@postgres:5432/cloudapp_db
     networks:
       - backend
@@ -165,6 +169,7 @@ services:
   notification:
     image: ${DOCKER_USERNAME}/cloudapp-notification:${IMAGE_TAG:-latest}
     environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}@postgres:5432/cloudapp_db
       RESEND_API_KEY: ${RESEND_API_KEY:-}
     networks:
@@ -188,6 +193,7 @@ services:
   analytics:
     image: ${DOCKER_USERNAME}/cloudapp-analytics:${IMAGE_TAG:-latest}
     environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}@postgres:5432/cloudapp_db
     networks:
       - backend
@@ -230,6 +236,23 @@ services:
       restart_policy:
         condition: any
         delay: 5s
+
+  # Traces distribuees (OpenTelemetry) : les services envoient leurs traces en OTLP/HTTP (port 4318).
+  # Jaeger v2, stockage en memoire (perdu au redemarrage). L'interface (16686) n'est PAS publiee :
+  # elle n'est joignable que depuis la pile (reseaux backend et traefik-public).
+  jaeger:
+    image: jaegertracing/jaeger:2.11.0
+    networks:
+      - backend
+      - traefik-public
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 256M
+      restart_policy:
+        condition: any
+        delay: 10s
 
   # Sauvegarde PostgreSQL : pg_dump + controle d'integrite + rotation + verification par restauration reelle.
   # Le script est fourni par un "config" Swarm (backup/backup.sh) ; les fichiers vont dans le volume backup_data.
