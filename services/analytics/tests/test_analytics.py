@@ -1,80 +1,98 @@
+"""Tests unitaires du service Analytics.
+
+Le service lit et ecrit dans PostgreSQL : ces tests utilisent la base du
+poste (en CI, un conteneur PostgreSQL jetable). Les tables sont creees au
+demarrage de l'application (evenement startup -> init_db()).
+"""
+import os
+import sys
+
 import pytest
 from fastapi.testclient import TestClient
-import sys
-import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'app'))
 
-from main import app, events_db, stats_db
+from main import app  # noqa: E402
 
-client = TestClient(app)
 
-def setup_function():
-    """Vide la base avant chaque test."""
-    events_db.clear()
-    stats_db["total_projects"] = 0
-    stats_db["total_invoices"] = 0
-    stats_db["total_notifications"] = 0
-    stats_db["total_users"] = 0
+@pytest.fixture(scope="module")
+def client():
+    # Le bloc "with" declenche l'evenement startup (creation des tables).
+    with TestClient(app) as c:
+        yield c
 
-def test_health_check():
-    """Le service doit répondre OK."""
+
+def test_health_check(client):
+    """Le service doit repondre OK."""
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json()["status"] == "ok"
-    assert response.json()["service"] == "analytics"
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["service"] == "analytics"
+    assert body["version"] == "2.0.0"
 
-def test_track_event():
-    """On doit pouvoir enregistrer un événement."""
+
+def test_track_event(client):
+    """Un evenement complet est enregistre et recoit un identifiant."""
     response = client.post("/track", json={
         "event_type": "project_created",
-        "user_id": "user_1",
-        "data": {"project_id": "proj_1", "name": "Mon Projet"}
+        "client_id": 1,
+        "project_id": 42,
+        "data": "name=Mon Projet",
     })
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "tracked"
+    assert body["event_type"] == "project_created"
+    assert isinstance(body["id"], int)
+
+
+def test_track_event_with_only_event_type(client):
+    """Seul event_type est obligatoire."""
+    response = client.post("/track", json={"event_type": "ping"})
     assert response.status_code == 200
     assert response.json()["status"] == "tracked"
-    assert response.json()["event_type"] == "project_created"
 
-def test_stats_updated_after_event():
-    """Les stats doivent être mises à jour après un événement."""
-    client.post("/track", json={
-        "event_type": "project_created",
-        "user_id": "user_1",
-        "data": {"project_id": "proj_1"}
+
+def test_track_event_requires_event_type(client):
+    """Sans event_type, la requete est rejetee."""
+    response = client.post("/track", json={"project_id": 1})
+    assert response.status_code == 422
+
+
+def test_track_event_rejects_invalid_project_id(client):
+    """project_id doit etre un entier."""
+    response = client.post("/track", json={
+        "event_type": "project_updated",
+        "project_id": "pas-un-nombre",
     })
+    assert response.status_code == 422
+
+
+def test_stats_structure(client):
+    """/stats expose les cinq compteurs attendus, avec des types coherents."""
     response = client.get("/stats")
     assert response.status_code == 200
-    assert response.json()["stats"]["total_projects"] == 1
+    stats = response.json()
+    for key in ("total_projects", "active_projects", "total_invoiced",
+                "paid_invoiced", "pending_invoiced"):
+        assert key in stats
+    assert isinstance(stats["total_projects"], int)
+    assert isinstance(stats["active_projects"], int)
+    assert stats["active_projects"] <= stats["total_projects"]
 
-def test_list_events():
-    """La liste des événements doit fonctionner."""
-    client.post("/track", json={
-        "event_type": "user_registered",
-        "user_id": "user_1",
-        "data": {"email": "user1@test.com"}
-    })
-    client.post("/track", json={
-        "event_type": "invoice_created",
-        "user_id": "user_1",
-        "data": {"invoice_id": "inv_1"}
-    })
-    response = client.get("/events")
+
+def test_stats_amounts_are_consistent(client):
+    """Le montant en attente vaut le total facture moins le total paye."""
+    stats = client.get("/stats").json()
+    assert stats["pending_invoiced"] == pytest.approx(
+        stats["total_invoiced"] - stats["paid_invoiced"]
+    )
+    assert stats["paid_invoiced"] <= stats["total_invoiced"]
+
+
+def test_metrics_endpoint_is_exposed(client):
+    """Prometheus doit pouvoir lire /metrics."""
+    response = client.get("/metrics")
     assert response.status_code == 200
-    assert response.json()["total"] == 2
-
-def test_get_event():
-    """On doit pouvoir récupérer un événement par son ID."""
-    create = client.post("/track", json={
-        "event_type": "notification_sent",
-        "user_id": "user_1",
-        "data": {"notif_id": "notif_1"}
-    })
-    event_id = create.json()["id"]
-    response = client.get(f"/events/{event_id}")
-    assert response.status_code == 200
-    assert response.json()["id"] == event_id
-
-def test_get_event_not_found():
-    """Un événement inexistant doit retourner 404."""
-    response = client.get("/events/evt_inexistant")
-    assert response.status_code == 404
+    assert "# HELP" in response.text

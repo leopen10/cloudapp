@@ -5,10 +5,10 @@ services:
     image: postgres:16
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: cloudapp2026
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant dans .env}"
       POSTGRES_DB: cloudapp_db
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -20,14 +20,14 @@ services:
       retries: 10
 
   auth:
-    build: ./services/auth
+    build:
+      context: ./services
+      dockerfile: auth/Dockerfile
     ports:
-      - "8001:8001"
+      - "127.0.0.1:8001:8001"
     environment:
-      DATABASE_URL: postgresql://postgres:cloudapp2026@postgres:5432/cloudapp_db
-      SECRET_KEY: cloudapp_jwt_secret_2026
-    volumes:
-      - ./services/shared:/app/shared
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cloudapp_db"
+      SECRET_KEY: "${JWT_SECRET_KEY:?JWT_SECRET_KEY manquant dans .env}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -35,13 +35,13 @@ services:
       - cloudapp-network
 
   project:
-    build: ./services/project
+    build:
+      context: ./services
+      dockerfile: project/Dockerfile
     ports:
-      - "8002:8002"
+      - "127.0.0.1:8002:8002"
     environment:
-      DATABASE_URL: postgresql://postgres:cloudapp2026@postgres:5432/cloudapp_db
-    volumes:
-      - ./services/shared:/app/shared
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cloudapp_db"
     depends_on:
       postgres:
         condition: service_healthy
@@ -49,13 +49,13 @@ services:
       - cloudapp-network
 
   billing:
-    build: ./services/billing
+    build:
+      context: ./services
+      dockerfile: billing/Dockerfile
     ports:
-      - "8003:8003"
+      - "127.0.0.1:8003:8003"
     environment:
-      DATABASE_URL: postgresql://postgres:cloudapp2026@postgres:5432/cloudapp_db
-    volumes:
-      - ./services/shared:/app/shared
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cloudapp_db"
     depends_on:
       postgres:
         condition: service_healthy
@@ -63,14 +63,14 @@ services:
       - cloudapp-network
 
   notification:
-    build: ./services/notification
+    build:
+      context: ./services
+      dockerfile: notification/Dockerfile
     ports:
-      - "8004:8004"
+      - "127.0.0.1:8004:8004"
     environment:
-      RESEND_API_KEY: re_eAaHN2mR_4iNW4nMchNcws4kpchFcmh96
-      DATABASE_URL: postgresql://postgres:cloudapp2026@postgres:5432/cloudapp_db
-    volumes:
-      - ./services/shared:/app/shared
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cloudapp_db"
     depends_on:
       postgres:
         condition: service_healthy
@@ -78,13 +78,13 @@ services:
       - cloudapp-network
 
   analytics:
-    build: ./services/analytics
+    build:
+      context: ./services
+      dockerfile: analytics/Dockerfile
     ports:
-      - "8005:8005"
+      - "127.0.0.1:8005:8005"
     environment:
-      DATABASE_URL: postgresql://postgres:cloudapp2026@postgres:5432/cloudapp_db
-    volumes:
-      - ./services/shared:/app/shared
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/cloudapp_db"
     depends_on:
       postgres:
         condition: service_healthy
@@ -92,11 +92,11 @@ services:
       - cloudapp-network
 
   gateway:
-    build: ./services/gateway
+    build:
+      context: ./services
+      dockerfile: gateway/Dockerfile
     ports:
-      - "8000:8000"
-    volumes:
-      - ./services/shared:/app/shared
+      - "127.0.0.1:8000:8000"
     depends_on:
       - auth
       - project
@@ -109,7 +109,7 @@ services:
   frontend:
     build: ./frontend
     ports:
-      - "3000:80"
+      - "127.0.0.1:3000:80"
     depends_on:
       - gateway
     networks:
@@ -118,7 +118,7 @@ services:
   prometheus:
     image: prom/prometheus:latest
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
     networks:
@@ -129,10 +129,10 @@ services:
   grafana:
     image: grafana/grafana-oss:10.2.0
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3001:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: cloudapp2026
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD manquant dans .env}"
     volumes:
       - grafana_data:/var/lib/grafana
     networks:
