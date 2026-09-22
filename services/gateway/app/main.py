@@ -21,6 +21,17 @@ SERVICES = {
     "analytics":    "http://analytics:8005",
 }
 
+def _json_or_raise(r: httpx.Response):
+    """Relaie le code de statut du service appele : le Gateway ne doit jamais
+    transformer une erreur d'un service (422, 404, 500...) en reponse 200."""
+    if r.status_code >= 400:
+        try:
+            detail = r.json()
+        except Exception:
+            detail = r.text
+        raise HTTPException(status_code=r.status_code, detail=detail)
+    return r.json()
+
 @app.get("/")
 async def root():
     return {"message": "Bienvenue sur CloudApp Gateway", "version": "2.0.0"}
@@ -46,45 +57,45 @@ async def status():
 async def login(data: dict):
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.post(f"{SERVICES['auth']}/login", json=data)
-        return r.json()
+        return _json_or_raise(r)
 
 @app.post("/auth/register")
 async def register(data: dict):
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.post(f"{SERVICES['auth']}/register", json=data)
-        return r.json()
+        return _json_or_raise(r)
 
 # ── CLIENTS ───────────────────────────────────────────────────────────────────
 @app.get("/clients")
 async def get_clients():
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.get(f"{SERVICES['project']}/clients")
-        return r.json()
+        return _json_or_raise(r)
 
 @app.post("/clients")
 async def create_client(data: dict):
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.post(f"{SERVICES['project']}/clients", json=data)
-        return r.json()
+        return _json_or_raise(r)
 
 # ── PROJECTS ──────────────────────────────────────────────────────────────────
 @app.get("/projects")
 async def get_projects():
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.get(f"{SERVICES['project']}/projects")
-        return r.json()
+        return _json_or_raise(r)
 
 @app.get("/projects/{project_id}")
 async def get_project(project_id: int):
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.get(f"{SERVICES['project']}/projects/{project_id}")
-        return r.json()
+        return _json_or_raise(r)
 
 @app.post("/projects")
 async def create_project(data: dict):
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.post(f"{SERVICES['project']}/projects", json=data)
-        result = r.json()
+        result = _json_or_raise(r)
         if "id" in result:
             try:
                 await client.post(f"{SERVICES['notification']}/notify/project-created", json={
@@ -101,7 +112,7 @@ async def create_project(data: dict):
 async def update_project(project_id: int, data: dict):
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.put(f"{SERVICES['project']}/projects/{project_id}", json=data)
-        result = r.json()
+        result = _json_or_raise(r)
         if "progress" in data:
             try:
                 await client.post(f"{SERVICES['notification']}/notify/progress", json={
@@ -138,46 +149,46 @@ async def update_project(project_id: int, data: dict):
 async def delete_project(project_id: int):
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.delete(f"{SERVICES['project']}/projects/{project_id}")
-        return r.json()
+        return _json_or_raise(r)
 
 # ── INVOICES ──────────────────────────────────────────────────────────────────
 @app.get("/invoices")
 async def get_invoices():
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.get(f"{SERVICES['billing']}/invoices")
-        return r.json()
+        return _json_or_raise(r)
 
 @app.get("/invoices/project/{project_id}")
 async def get_invoices_by_project(project_id: int):
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.get(f"{SERVICES['billing']}/invoices/project/{project_id}")
-        return r.json()
+        return _json_or_raise(r)
 
 @app.post("/invoices/{invoice_id}/pay")
 async def pay_invoice(invoice_id: int):
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.post(f"{SERVICES['billing']}/invoices/{invoice_id}/pay")
-        return r.json()
+        return _json_or_raise(r)
 
 # ── NOTIFICATIONS ─────────────────────────────────────────────────────────────
 @app.get("/notifications")
 async def get_notifications():
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.get(f"{SERVICES['notification']}/notifications")
-        return r.json()
+        return _json_or_raise(r)
 
 @app.put("/notifications/{notif_id}/read")
 async def mark_read(notif_id: int):
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.put(f"{SERVICES['notification']}/notifications/{notif_id}/read")
-        return r.json()
+        return _json_or_raise(r)
 
 # ── ANALYTICS ─────────────────────────────────────────────────────────────────
 @app.get("/analytics/stats")
 async def get_stats():
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.get(f"{SERVICES['analytics']}/stats")
-        return r.json()
+        return _json_or_raise(r)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
