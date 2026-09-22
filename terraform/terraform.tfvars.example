@@ -1,0 +1,25 @@
+# terraform.tfvars.example
+# Copiez ce fichier en "terraform.tfvars" et remplissez vos propres valeurs.
+# terraform.tfvars ne doit JAMAIS etre commite (voir .gitignore).
+
+aws_region     = "eu-west-3"
+environment    = "demo"
+instance_type  = "t3.small"
+root_volume_gb = 20
+
+# Votre IP publique uniquement (verifiez sur https://checkip.amazonaws.com), suivie de /32.
+ssh_allowed_cidr = "203.0.113.42/32"
+
+# Chemin vers votre cle SSH PUBLIQUE (le fichier .pub, jamais la clé privee).
+ssh_public_key_path = "~/.ssh/cloudapp.pub"
+
+docker_username = "leonelpengou10"
+
+monthly_budget_usd = 5
+budget_alert_email = "leonelpengou10@gmail.com"
+
+# --- Secrets (a ne jamais commiter) ---
+postgres_password      = "CHANGEZ-MOI-lettres-et-chiffres-uniquement"
+jwt_secret_key          = "CHANGEZ-MOI-une-longue-chaine-aleatoire"
+grafana_admin_password  = "CHANGEZ-MOI"
+resend_api_key          = "" # facultatif : laisser vide desactive l'envoi d'e-mails
