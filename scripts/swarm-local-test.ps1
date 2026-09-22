@@ -305,14 +305,20 @@ $notifOk = $false
 $notifDetail = ''
 try {
     $before = (Invoke-RestMethod -Uri 'http://localhost/api/notifications' -TimeoutSec 10).Count
-    $proj = Invoke-RestMethod -Method Post -Uri 'http://localhost/api/projects' -ContentType 'application/json' -Body '{"name":"Test tracage","budget":1000}' -TimeoutSec 10
+    # Un client reel est necessaire : /projects exige desormais un client_id valide
+    # (le Gateway relaie fidelement l'erreur sinon, voir fix-gateway-status.ps1).
+    $suffix = Get-Random -Minimum 10000 -Maximum 99999
+    $clientBody = "{`"company_name`":`"Test Swarm $suffix`",`"email`":`"test-swarm-$suffix@cloudapp.io`"}"
+    $cl = Invoke-RestMethod -Method Post -Uri 'http://localhost/api/clients' -ContentType 'application/json' -Body $clientBody -TimeoutSec 10
+    $projBody = "{`"client_id`":$($cl.id),`"name`":`"Test tracage`",`"budget`":1000}"
+    $proj = Invoke-RestMethod -Method Post -Uri 'http://localhost/api/projects' -ContentType 'application/json' -Body $projBody -TimeoutSec 10
     if ($proj.id) {
         Invoke-RestMethod -Method Put -Uri "http://localhost/api/projects/$($proj.id)" -ContentType 'application/json' -Body '{"progress":40}' -TimeoutSec 10 | Out-Null
     }
     Start-Sleep -Seconds 2
     $after = (Invoke-RestMethod -Uri 'http://localhost/api/notifications' -TimeoutSec 10).Count
     $notifOk = ($after -gt $before)
-    $notifDetail = "$before -> $after notifications"
+    $notifDetail = "client $($cl.id) : $before -> $after notifications"
 }
 catch { $notifDetail = $_.Exception.Message }
 Add-Result 'Notifications automatiques (creation projet + avancement)' $notifOk $notifDetail
