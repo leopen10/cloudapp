@@ -1,0 +1,9 @@
+# Etat Terraform : contient les secrets en clair, ne jamais commiter.
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Vos vraies valeurs (secrets) : ne jamais commiter, seul le .example l'est.
+terraform.tfvars
+*.auto.tfvars
